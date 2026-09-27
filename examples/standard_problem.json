@@ -1,0 +1,985 @@
+{
+  "corridor": {
+    "corridor_id": "standard_6int",
+    "intersections": [
+      "I1",
+      "I2",
+      "I3",
+      "I4",
+      "I5",
+      "I6"
+    ],
+    "segments": [
+      {
+        "from": "I1",
+        "to": "I2",
+        "distance_m": 200.0,
+        "speed_up_mps": 15.0,
+        "speed_down_mps": 14.0
+      },
+      {
+        "from": "I2",
+        "to": "I3",
+        "distance_m": 350.0,
+        "speed_up_mps": 13.0,
+        "speed_down_mps": 15.0
+      },
+      {
+        "from": "I3",
+        "to": "I4",
+        "distance_m": 175.0,
+        "speed_up_mps": 14.0,
+        "speed_down_mps": 13.0
+      },
+      {
+        "from": "I4",
+        "to": "I5",
+        "distance_m": 360.0,
+        "speed_up_mps": 14.0,
+        "speed_down_mps": 16.0
+      },
+      {
+        "from": "I5",
+        "to": "I6",
+        "distance_m": 190.0,
+        "speed_up_mps": 15.0,
+        "speed_down_mps": 17.0
+      }
+    ]
+  },
+  "plans": [
+    {
+      "id": "I1_P1",
+      "intersection": "I1",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.5
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.5
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {},
+        "down": {}
+      },
+      "hard_constraints": [],
+      "soft_constraints": []
+    },
+    {
+      "id": "I2_P1",
+      "intersection": "I2",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.5
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.5
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {
+          "0": {
+            "end": [
+              0.0,
+              0.2
+            ]
+          }
+        },
+        "down": {
+          "0": {
+            "end": [
+              0.0,
+              0.2
+            ]
+          }
+        }
+      },
+      "hard_constraints": [
+        {
+          "id": "I2_up_end_hard_070",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I2",
+                "plan": "I2_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.7,
+          "hard": true
+        },
+        {
+          "id": "I2_down_end_hard_070",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I2",
+                "plan": "I2_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.7,
+          "hard": true
+        },
+        {
+          "id": "I2_sync_up_down_end",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I2",
+                "plan": "I2_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            },
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I2",
+                "plan": "I2_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": -1.0
+            }
+          ],
+          "sense": "==",
+          "rhs": 0.0,
+          "hard": true
+        }
+      ],
+      "soft_constraints": [
+        {
+          "id": "I2_up_end_soft_055",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I2",
+                "plan": "I2_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.55,
+          "hard": false,
+          "soft": {
+            "coef": 8.0,
+            "owner": "intersection_loss"
+          }
+        },
+        {
+          "id": "I2_down_end_soft_055",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I2",
+                "plan": "I2_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.55,
+          "hard": false,
+          "soft": {
+            "coef": 8.0,
+            "owner": "intersection_loss"
+          }
+        }
+      ]
+    },
+    {
+      "id": "I3_P1",
+      "intersection": "I3",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.5
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.5
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {
+          "0": {
+            "end": [
+              0.0,
+              0.2
+            ]
+          }
+        },
+        "down": {
+          "0": {
+            "end": [
+              0.0,
+              0.2
+            ]
+          }
+        }
+      },
+      "hard_constraints": [
+        {
+          "id": "I3_up_end_hard_070",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.7,
+          "hard": true
+        },
+        {
+          "id": "I3_down_end_hard_070",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.7,
+          "hard": true
+        },
+        {
+          "id": "I3_sync_up_down_end",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            },
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": -1.0
+            }
+          ],
+          "sense": "==",
+          "rhs": 0.0,
+          "hard": true
+        }
+      ],
+      "soft_constraints": [
+        {
+          "id": "I3_up_end_soft_055",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.55,
+          "hard": false,
+          "soft": {
+            "coef": 8.0,
+            "owner": "intersection_loss"
+          }
+        },
+        {
+          "id": "I3_down_end_soft_055",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.55,
+          "hard": false,
+          "soft": {
+            "coef": 8.0,
+            "owner": "intersection_loss"
+          }
+        }
+      ]
+    },
+    {
+      "id": "I4_P1",
+      "intersection": "I4",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.5
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.5
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {
+          "0": {
+            "end": [
+              0.0,
+              0.2
+            ]
+          }
+        },
+        "down": {
+          "0": {
+            "end": [
+              0.0,
+              0.2
+            ]
+          }
+        }
+      },
+      "hard_constraints": [
+        {
+          "id": "I4_up_end_hard_070",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.7,
+          "hard": true
+        },
+        {
+          "id": "I4_down_end_hard_070",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.7,
+          "hard": true
+        },
+        {
+          "id": "I4_sync_up_down_end",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            },
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": -1.0
+            }
+          ],
+          "sense": "==",
+          "rhs": 0.0,
+          "hard": true
+        }
+      ],
+      "soft_constraints": [
+        {
+          "id": "I4_up_end_soft_055",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.55,
+          "hard": false,
+          "soft": {
+            "coef": 8.0,
+            "owner": "intersection_loss"
+          }
+        },
+        {
+          "id": "I4_down_end_soft_055",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.55,
+          "hard": false,
+          "soft": {
+            "coef": 8.0,
+            "owner": "intersection_loss"
+          }
+        }
+      ]
+    },
+    {
+      "id": "I5_P1",
+      "intersection": "I5",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.5
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.5
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {
+          "0": {
+            "end": [
+              0.0,
+              0.2
+            ]
+          }
+        },
+        "down": {
+          "0": {
+            "end": [
+              0.0,
+              0.2
+            ]
+          }
+        }
+      },
+      "hard_constraints": [
+        {
+          "id": "I5_up_end_hard_070",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I5",
+                "plan": "I5_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.7,
+          "hard": true
+        },
+        {
+          "id": "I5_down_end_hard_070",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I5",
+                "plan": "I5_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.7,
+          "hard": true
+        }
+      ],
+      "soft_constraints": [
+        {
+          "id": "I5_up_end_soft_055",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I5",
+                "plan": "I5_P1",
+                "direction": "up",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.55,
+          "hard": false,
+          "soft": {
+            "coef": 8.0,
+            "owner": "intersection_loss"
+          }
+        },
+        {
+          "id": "I5_down_end_soft_055",
+          "terms": [
+            {
+              "atom": {
+                "kind": "endpoint",
+                "intersection": "I5",
+                "plan": "I5_P1",
+                "direction": "down",
+                "window": 0,
+                "side": "end"
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": "<=",
+          "rhs_ratio": 0.55,
+          "hard": false,
+          "soft": {
+            "coef": 8.0,
+            "owner": "intersection_loss"
+          }
+        }
+      ]
+    },
+    {
+      "id": "I6_P1",
+      "intersection": "I6",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.5
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.5
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {},
+        "down": {}
+      },
+      "hard_constraints": [],
+      "soft_constraints": []
+    }
+  ],
+  "objective": {
+    "band_demands": [
+      {
+        "id": "GW_up_full",
+        "type": "green",
+        "direction": "up",
+        "nodes": [
+          "I1",
+          "I2",
+          "I3",
+          "I4",
+          "I5",
+          "I6"
+        ],
+        "max_bands": 1,
+        "weight": 5.0,
+        "margin": {
+          "delta_min_s": 2.0,
+          "coef": 1.0
+        }
+      },
+      {
+        "id": "RW_down_6_5",
+        "type": "red",
+        "direction": "down",
+        "nodes": [
+          "I6",
+          "I5"
+        ],
+        "max_bands": 1,
+        "weight": 1.0
+      },
+      {
+        "id": "RW_down_5_4",
+        "type": "red",
+        "direction": "down",
+        "nodes": [
+          "I5",
+          "I4"
+        ],
+        "max_bands": 1,
+        "weight": 1.0
+      },
+      {
+        "id": "RW_down_4_3",
+        "type": "red",
+        "direction": "down",
+        "nodes": [
+          "I4",
+          "I3"
+        ],
+        "max_bands": 1,
+        "weight": 1.0
+      },
+      {
+        "id": "RW_down_3_2",
+        "type": "red",
+        "direction": "down",
+        "nodes": [
+          "I3",
+          "I2"
+        ],
+        "max_bands": 1,
+        "weight": 1.0
+      },
+      {
+        "id": "RW_down_2_1",
+        "type": "red",
+        "direction": "down",
+        "nodes": [
+          "I2",
+          "I1"
+        ],
+        "max_bands": 1,
+        "weight": 1.0
+      }
+    ],
+    "margin_default": {
+      "delta_min_s": 2.0,
+      "coef": 1.0
+    },
+    "pareto": {
+      "num_points": 8,
+      "relax_max": 0.3,
+      "topk_grids": 1
+    },
+    "allow_window_sharing": false,
+    "balanced_groups": []
+  },
+  "grid": {
+    "cycles_s": [
+      140.0
+    ],
+    "speed_ratios": [
+      1.0
+    ]
+  },
+  "solver": {
+    "backend": "scipy",
+    "time_limit_s": 60.0,
+    "mip_rel_gap": 0.0,
+    "num_workers": 1,
+    "heuristic": {
+      "enabled": true,
+      "refine_rounds": 3
+    }
+  },
+  "global_constraints": [
+    {
+      "id": "up_bandwidth_min_15",
+      "terms": [
+        {
+          "atom": {
+            "kind": "bandwidth",
+            "demand": "GW_up_full"
+          },
+          "coef": 1.0
+        }
+      ],
+      "sense": ">=",
+      "rhs": 15.0,
+      "hard": true
+    },
+    {
+      "id": "up_bandwidth_preferred_20",
+      "terms": [
+        {
+          "atom": {
+            "kind": "bandwidth",
+            "demand": "GW_up_full"
+          },
+          "coef": 1.0
+        }
+      ],
+      "sense": ">=",
+      "rhs": 20.0,
+      "hard": false,
+      "soft": {
+        "coef": 1.0,
+        "owner": "composite"
+      }
+    }
+  ],
+  "constraint_templates": [
+    {
+      "id": "all_green_min_15s",
+      "scope": {
+        "kind": "all_plan_windows",
+        "directions": [
+          "up",
+          "down"
+        ]
+      },
+      "terms": [
+        {
+          "atom": {
+            "kind": "window_duration"
+          },
+          "coef": 1.0
+        }
+      ],
+      "sense": ">=",
+      "rhs": 15.0,
+      "rhs_unit": "s",
+      "hard": true
+    },
+    {
+      "id": "all_red_min_15s",
+      "scope": {
+        "kind": "all_plan_red_windows",
+        "directions": [
+          "up",
+          "down"
+        ]
+      },
+      "terms": [
+        {
+          "atom": {
+            "kind": "red_duration"
+          },
+          "coef": 1.0
+        }
+      ],
+      "sense": ">=",
+      "rhs": 15.0,
+      "rhs_unit": "s",
+      "hard": true
+    },
+    {
+      "id": "all_green_loss_25s",
+      "scope": {
+        "kind": "all_plan_windows",
+        "directions": [
+          "up",
+          "down"
+        ]
+      },
+      "terms": [
+        {
+          "atom": {
+            "kind": "window_duration"
+          },
+          "coef": 1.0
+        }
+      ],
+      "sense": ">=",
+      "rhs": 25.0,
+      "rhs_unit": "s",
+      "hard": false,
+      "soft": {
+        "coef": 2.0,
+        "owner": "intersection_loss"
+      }
+    },
+    {
+      "id": "all_red_loss_25s",
+      "scope": {
+        "kind": "all_plan_red_windows",
+        "directions": [
+          "up",
+          "down"
+        ]
+      },
+      "terms": [
+        {
+          "atom": {
+            "kind": "red_duration"
+          },
+          "coef": 1.0
+        }
+      ],
+      "sense": ">=",
+      "rhs": 25.0,
+      "rhs_unit": "s",
+      "hard": false,
+      "soft": {
+        "coef": 1.0,
+        "owner": "intersection_loss"
+      }
+    },
+    {
+      "id": "all_green_excess_70s",
+      "scope": {
+        "kind": "all_plan_windows",
+        "directions": [
+          "up",
+          "down"
+        ]
+      },
+      "terms": [
+        {
+          "atom": {
+            "kind": "window_duration"
+          },
+          "coef": 1.0
+        }
+      ],
+      "sense": "<=",
+      "rhs": 70.0,
+      "rhs_unit": "s",
+      "hard": false,
+      "soft": {
+        "coef": 0.2,
+        "owner": "intersection_loss"
+      }
+    },
+    {
+      "id": "all_red_excess_70s",
+      "scope": {
+        "kind": "all_plan_red_windows",
+        "directions": [
+          "up",
+          "down"
+        ]
+      },
+      "terms": [
+        {
+          "atom": {
+            "kind": "red_duration"
+          },
+          "coef": 1.0
+        }
+      ],
+      "sense": "<=",
+      "rhs": 70.0,
+      "rhs_unit": "s",
+      "hard": false,
+      "soft": {
+        "coef": 0.3,
+        "owner": "intersection_loss"
+      }
+    }
+  ]
+}

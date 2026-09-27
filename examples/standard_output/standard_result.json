@@ -1,0 +1,1073 @@
+{
+  "grid_results": [
+    {
+      "cycle_s": 140.0,
+      "speed_ratio": 1.0,
+      "status": "optimal",
+      "composite_best": 516.0000000000013,
+      "heuristic_bound": 496.0000000006667,
+      "solve_time_s": 0.3079522000043653,
+      "dropped_plans": [],
+      "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+      "bandwidth_objective_s": 528.0000000000017,
+      "negative_margin_loss_s": -12.000000000001359,
+      "negative_intersection_loss_s": -524.0000000000007,
+      "bandwidth_objective_ratio": 3.771428571428584,
+      "negative_margin_loss_ratio": -0.08571428571429542,
+      "negative_intersection_loss_ratio": -3.7428571428571478
+    }
+  ],
+  "pareto": {
+    "grid": {
+      "cycle_s": 140.0,
+      "speed_ratio": 1.0
+    },
+    "points": [
+      {
+        "epsilon": 0.0,
+        "composite_actual": 515.9999483999993,
+        "intersection_loss": 523.9991537599533,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 11.333333333333968,
+            "I3": 34.66666666666805,
+            "I4": 46.33333333333337,
+            "I5": 44.33333333333336,
+            "I6": 85.0
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.028571428571424206,
+            "I2_P1.down.0.end": 0.028571428571424206,
+            "I3_P1.up.0.end": 0.02857142857141832,
+            "I3_P1.down.0.end": 0.02857142857141832,
+            "I4_P1.up.0.end": 0.1999996314285514,
+            "I4_P1.down.0.end": 0.1999996314285514,
+            "I5_P1.up.0.end": 0.2,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 70.0,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_6_5",
+              "slot": 1,
+              "exists": true,
+              "width_s": 53.333333333333265,
+              "start_at_anchor_s": 114.33333333333336,
+              "windows": {
+                "I6": 1,
+                "I5": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_4_3",
+              "slot": 1,
+              "exists": true,
+              "width_s": 47.33328173333052,
+              "start_at_anchor_s": 108.66666666666667,
+              "windows": {
+                "I4": 1,
+                "I3": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_3_2",
+              "slot": 1,
+              "exists": true,
+              "width_s": 46.666666666671325,
+              "start_at_anchor_s": 85.33333333332949,
+              "windows": {
+                "I3": 1,
+                "I2": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_2_1",
+              "slot": 1,
+              "exists": true,
+              "width_s": 28.666666666666206,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I2": 1,
+                "I1": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [
+            {
+              "id": "I4_up_end_soft_055",
+              "violation_s": 20.999948399997194,
+              "cost": 167.99958719997755,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "I4_down_end_soft_055",
+              "violation_s": 20.999948399997194,
+              "cost": 167.99958719997755,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "I5_up_end_soft_055",
+              "violation_s": 21.0,
+              "cost": 168.0,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I2_P1:up:0",
+              "violation_s": 3.999999999999389,
+              "cost": 0.7999999999998778,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I2_P1:down:0",
+              "violation_s": 3.999999999999389,
+              "cost": 0.7999999999998778,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I3_P1:up:0",
+              "violation_s": 3.9999999999985647,
+              "cost": 0.7999999999997129,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I3_P1:down:0",
+              "violation_s": 3.9999999999985647,
+              "cost": 0.7999999999997129,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I4_P1:up:0",
+              "violation_s": 27.999948399997194,
+              "cost": 5.599989679999439,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I4_P1:down:0",
+              "violation_s": 27.999948399997194,
+              "cost": 5.599989679999439,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I5_P1:up:0",
+              "violation_s": 28.0,
+              "cost": 5.6000000000000005,
+              "owner": "intersection_loss"
+            }
+          ],
+          "balanced_groups": {},
+          "band_reward_s": 525.9999484000014,
+          "margin_loss_s": 10.000000000002046,
+          "intersection_loss_s": 523.9991537599533
+        }
+      },
+      {
+        "epsilon": 19.350000000000048,
+        "composite_actual": 496.6499484000012,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 11.333333333333496,
+            "I3": 34.66666666666663,
+            "I4": 46.33333333333335,
+            "I5": 69.65830753333377,
+            "I6": 84.3249742000004
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 67.3249742000004,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_6_5",
+              "slot": 1,
+              "exists": true,
+              "width_s": 27.333333333333258,
+              "start_at_anchor_s": 139.65830753333395,
+              "windows": {
+                "I6": 1,
+                "I5": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_5_4",
+              "slot": 1,
+              "exists": true,
+              "width_s": 47.324974200000675,
+              "start_at_anchor_s": 116.3333333333331,
+              "windows": {
+                "I5": 1,
+                "I4": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_4_3",
+              "slot": 1,
+              "exists": true,
+              "width_s": 23.33333333333335,
+              "start_at_anchor_s": 104.66666666666663,
+              "windows": {
+                "I4": 1,
+                "I3": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_3_2",
+              "slot": 1,
+              "exists": true,
+              "width_s": 46.66666666666651,
+              "start_at_anchor_s": 81.3333333333335,
+              "windows": {
+                "I3": 1,
+                "I2": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_2_1",
+              "slot": 1,
+              "exists": true,
+              "width_s": 24.666666666666963,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I2": 1,
+                "I1": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 505.94984520000276,
+          "margin_loss_s": 9.299896800001534,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 38.700000000000095,
+        "composite_actual": 477.29994839999983,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 9.18570691428629,
+            "I3": 32.51904024761876,
+            "I4": 44.185706914286186,
+            "I5": 66.18570691428607,
+            "I6": 80.85237358095225
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 63.852373580952246,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_6_5",
+              "slot": 1,
+              "exists": true,
+              "width_s": 23.519040247618783,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I6": 1,
+                "I5": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_5_4",
+              "slot": 1,
+              "exists": true,
+              "width_s": 45.999999999999886,
+              "start_at_anchor_s": 114.18570691428619,
+              "windows": {
+                "I5": 1,
+                "I4": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_4_3",
+              "slot": 1,
+              "exists": true,
+              "width_s": 23.333333333334053,
+              "start_at_anchor_s": 102.51904024761876,
+              "windows": {
+                "I4": 1,
+                "I3": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_3_2",
+              "slot": 1,
+              "exists": true,
+              "width_s": 46.66666666666584,
+              "start_at_anchor_s": 79.1857069142863,
+              "windows": {
+                "I3": 1,
+                "I2": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_2_1",
+              "slot": 1,
+              "exists": true,
+              "width_s": 22.519040247619728,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I2": 1,
+                "I1": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 481.2999483999995,
+          "margin_loss_s": 3.9999999999996305,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 58.05000000000013,
+        "composite_actual": 457.94994839999976,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 9.754754533335074,
+            "I3": 33.088087866668616,
+            "I4": 42.7547545333349,
+            "I5": 66.75475453333445,
+            "I6": 81.4214212000017
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 64.4214212000017,
+              "start_at_anchor_s": 139.9999999999999,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_6_5",
+              "slot": 1,
+              "exists": true,
+              "width_s": 24.088087866664438,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I6": 1,
+                "I5": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_5_4",
+              "slot": 1,
+              "exists": true,
+              "width_s": 47.999999999992454,
+              "start_at_anchor_s": 112.75475453333313,
+              "windows": {
+                "I5": 1,
+                "I4": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_3_2",
+              "slot": 1,
+              "exists": true,
+              "width_s": 46.66666666666621,
+              "start_at_anchor_s": 79.75475453333578,
+              "windows": {
+                "I3": 1,
+                "I2": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_2_1",
+              "slot": 1,
+              "exists": true,
+              "width_s": 23.088087866668655,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I2": 1,
+                "I1": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 463.9499484000003,
+          "margin_loss_s": 6.000000000000568,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 77.40000000000019,
+        "composite_actual": 438.5999484000008,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 9.877769177777566,
+            "I3": 33.21110251111094,
+            "I4": 42.87776917777791,
+            "I5": 68.8777691777778,
+            "I6": 81.54443584444442
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 64.54443584444442,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_5_4",
+              "slot": 1,
+              "exists": true,
+              "width_s": 50.00000000000011,
+              "start_at_anchor_s": 112.8777691777779,
+              "windows": {
+                "I5": 1,
+                "I4": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_3_2",
+              "slot": 1,
+              "exists": true,
+              "width_s": 46.666666666667844,
+              "start_at_anchor_s": 79.87776917777519,
+              "windows": {
+                "I3": 1,
+                "I2": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_2_1",
+              "slot": 1,
+              "exists": true,
+              "width_s": 23.211102511110937,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I2": 1,
+                "I1": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 442.599948400001,
+          "margin_loss_s": 4.0000000000001705,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 96.75000000000023,
+        "composite_actual": 419.24994840000113,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 140.0,
+            "I3": 34.66666666666663,
+            "I4": 35.0,
+            "I5": 61.0,
+            "I6": 82.24994840000144
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 56.66666666666663,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_6_5",
+              "slot": 1,
+              "exists": true,
+              "width_s": 33.916615066668065,
+              "start_at_anchor_s": 130.99999999999997,
+              "windows": {
+                "I6": 1,
+                "I5": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_5_4",
+              "slot": 1,
+              "exists": true,
+              "width_s": 50.00000000000001,
+              "start_at_anchor_s": 105.0,
+              "windows": {
+                "I5": 1,
+                "I4": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_3_2",
+              "slot": 1,
+              "exists": true,
+              "width_s": 57.99999999999981,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I3": 1,
+                "I2": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                -1
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 425.249948400001,
+          "margin_loss_s": 5.999999999999915,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 116.10000000000026,
+        "composite_actual": 399.8999484000009,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 11.333333333333371,
+            "I3": 34.66666666666663,
+            "I4": 46.33333333333337,
+            "I5": 70.0,
+            "I6": 83.0
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 66.0,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_6_5",
+              "slot": 1,
+              "exists": true,
+              "width_s": 25.6666666666666,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I6": 1,
+                "I5": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_4_3",
+              "slot": 1,
+              "exists": true,
+              "width_s": 23.33333333333339,
+              "start_at_anchor_s": 104.66666666666664,
+              "windows": {
+                "I4": 1,
+                "I3": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_2_1",
+              "slot": 1,
+              "exists": true,
+              "width_s": 23.233281733334305,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I2": 1,
+                "I1": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 402.2332817333343,
+          "margin_loss_s": 2.333333333333428,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 135.45000000000033,
+        "composite_actual": 380.54994840000086,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 12.608307533333829,
+            "I3": 34.66666666666663,
+            "I4": 46.33333333333337,
+            "I5": 70.0,
+            "I6": 84.27497420000046
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 67.27497420000046,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_6_5",
+              "slot": 1,
+              "exists": true,
+              "width_s": 26.941640866667097,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I6": 1,
+                "I5": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_2_1",
+              "slot": 1,
+              "exists": true,
+              "width_s": 25.94164086666719,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I2": 1,
+                "I1": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 389.25815273333654,
+          "margin_loss_s": 8.708204333335686,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 154.80000000000038,
+        "composite_actual": 361.1999484000006,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 11.333333333333371,
+            "I3": 34.666666666666636,
+            "I4": 46.333333333333385,
+            "I5": 70.33333333333339,
+            "I6": 82.99999999999999
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 66.00000000000001,
+              "start_at_anchor_s": 140.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_5_4",
+              "slot": 1,
+              "exists": true,
+              "width_s": 33.19994840000072,
+              "start_at_anchor_s": 116.33333333333339,
+              "windows": {
+                "I5": 1,
+                "I4": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 363.1999484000008,
+          "margin_loss_s": 2.000000000000199,
+          "intersection_loss_s": 0.0
+        }
+      }
+    ]
+  }
+}

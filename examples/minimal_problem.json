@@ -1,0 +1,148 @@
+{
+  "corridor": {
+    "corridor_id": "demo",
+    "intersections": [
+      "I1",
+      "I2",
+      "I3"
+    ],
+    "segments": [
+      {
+        "from": "I1",
+        "to": "I2",
+        "speed_up_mps": 11.1111111111,
+        "speed_down_mps": 11.1111111111,
+        "distance_up_m": 500.0,
+        "distance_down_m": 520.0
+      },
+      {
+        "from": "I2",
+        "to": "I3",
+        "speed_up_mps": 11.1111111111,
+        "speed_down_mps": 11.1111111111,
+        "distance_up_m": 500.0,
+        "distance_down_m": 520.0
+      }
+    ]
+  },
+  "plans": [
+    {
+      "id": "I1_P1",
+      "intersection": "I1",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.45
+          ]
+        ],
+        "down": [
+          [
+            0.5,
+            0.95
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {},
+        "down": {}
+      }
+    },
+    {
+      "id": "I2_P1",
+      "intersection": "I2",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.45
+          ]
+        ],
+        "down": [
+          [
+            0.5,
+            0.95
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {},
+        "down": {}
+      }
+    },
+    {
+      "id": "I3_P1",
+      "intersection": "I3",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.45
+          ]
+        ],
+        "down": [
+          [
+            0.5,
+            0.95
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {},
+        "down": {}
+      }
+    }
+  ],
+  "objective": {
+    "band_demands": [
+      {
+        "id": "GW_up",
+        "type": "green",
+        "direction": "up",
+        "nodes": [
+          "I1",
+          "I2",
+          "I3"
+        ],
+        "max_bands": null,
+        "weight": 1.0,
+        "margin": {
+          "delta_min_s": 0.0,
+          "coef": 1.0
+        }
+      }
+    ],
+    "margin_default": {
+      "delta_min_s": 0.0,
+      "coef": 1.0
+    },
+    "pareto": {
+      "num_points": 2,
+      "relax_max": 0.1,
+      "topk_grids": 1
+    }
+  },
+  "grid": {
+    "cycles_s": [
+      80,
+      90,
+      100
+    ],
+    "speed_ratios": [
+      1.0
+    ]
+  },
+  "solver": {
+    "backend": "scipy",
+    "time_limit_s": 120,
+    "mip_rel_gap": 0.0,
+    "num_workers": 2,
+    "heuristic": {
+      "enabled": true,
+      "refine_rounds": 3
+    }
+  }
+}

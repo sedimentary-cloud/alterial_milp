@@ -1,0 +1,185 @@
+{
+  "corridor": {
+    "corridor_id": "balanced_demo",
+    "intersections": [
+      "I1",
+      "I2",
+      "I3"
+    ],
+    "segments": [
+      {
+        "from": "I1",
+        "to": "I2",
+        "distance_m": 500.0,
+        "speed_up_mps": 11.1111111111,
+        "speed_down_mps": 11.1111111111
+      },
+      {
+        "from": "I2",
+        "to": "I3",
+        "distance_m": 500.0,
+        "speed_up_mps": 11.1111111111,
+        "speed_down_mps": 11.1111111111
+      }
+    ]
+  },
+  "plans": [
+    {
+      "id": "I1_P1",
+      "intersection": "I1",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.45
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.2
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {},
+        "down": {}
+      },
+      "hard_constraints": [],
+      "soft_constraints": []
+    },
+    {
+      "id": "I2_P1",
+      "intersection": "I2",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.45
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.2
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {},
+        "down": {}
+      },
+      "hard_constraints": [],
+      "soft_constraints": []
+    },
+    {
+      "id": "I3_P1",
+      "intersection": "I3",
+      "double_cycle": false,
+      "windows": {
+        "up": [
+          [
+            0.0,
+            0.45
+          ]
+        ],
+        "down": [
+          [
+            0.0,
+            0.2
+          ]
+        ]
+      },
+      "adjustable": {
+        "up": {},
+        "down": {}
+      },
+      "hard_constraints": [],
+      "soft_constraints": []
+    }
+  ],
+  "objective": {
+    "band_demands": [
+      {
+        "id": "GW_up",
+        "type": "green",
+        "direction": "up",
+        "nodes": [
+          "I1",
+          "I2",
+          "I3"
+        ],
+        "max_bands": 1,
+        "weight": 1.0,
+        "margin": {
+          "delta_min_s": 0.0,
+          "coef": 1.0
+        }
+      },
+      {
+        "id": "GW_down",
+        "type": "green",
+        "direction": "down",
+        "nodes": [
+          "I3",
+          "I2",
+          "I1"
+        ],
+        "max_bands": 1,
+        "weight": 1.0,
+        "margin": {
+          "delta_min_s": 0.0,
+          "coef": 1.0
+        }
+      }
+    ],
+    "margin_default": {
+      "delta_min_s": 0.0,
+      "coef": 1.0
+    },
+    "pareto": {
+      "num_points": 0,
+      "relax_max": 0.0,
+      "topk_grids": 1
+    },
+    "allow_window_sharing": false,
+    "balanced_groups": [
+      {
+        "id": "balance_up_down",
+        "demands": [
+          "GW_up",
+          "GW_down"
+        ],
+        "weight": 5.0,
+        "on_infeasible": "zero",
+        "targets_s": {
+          "GW_up": 30.0,
+          "GW_down": 20.0
+        },
+        "min_existing": 2,
+        "min_existing_penalty_s": 0.5
+      }
+    ]
+  },
+  "grid": {
+    "cycles_s": [
+      90.0
+    ],
+    "speed_ratios": [
+      1.0
+    ]
+  },
+  "solver": {
+    "backend": "scipy",
+    "time_limit_s": 30.0,
+    "mip_rel_gap": 0.0,
+    "num_workers": 1,
+    "heuristic": {
+      "enabled": false,
+      "refine_rounds": 0
+    }
+  },
+  "global_constraints": []
+}
