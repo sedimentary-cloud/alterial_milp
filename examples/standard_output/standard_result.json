@@ -4,17 +4,17 @@
       "cycle_s": 140.0,
       "speed_ratio": 1.0,
       "status": "optimal",
-      "composite_best": 491.68013359189837,
+      "composite_best": 383.65082956259494,
       "heuristic_bound": 465.8944193065357,
-      "solve_time_s": 0.1659471000020858,
+      "solve_time_s": 0.20783630000369158,
       "dropped_plans": [],
       "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
-      "bandwidth_objective_s": 501.6801335918983,
-      "negative_margin_loss_s": -10.000000000000036,
-      "negative_intersection_loss_s": -524.0000000000001,
-      "bandwidth_objective_ratio": 3.5834295256564164,
-      "negative_margin_loss_ratio": -0.07142857142857169,
-      "negative_intersection_loss_ratio": -3.7428571428571438
+      "bandwidth_objective_s": 392.06410256410356,
+      "negative_margin_loss_s": -8.413273001509005,
+      "negative_intersection_loss_s": -522.0000000000001,
+      "bandwidth_objective_ratio": 2.8004578754578824,
+      "negative_margin_loss_ratio": -0.06009480715363575,
+      "negative_intersection_loss_ratio": -3.7285714285714295
     }
   ],
   "pareto": {
@@ -25,8 +25,8 @@
     "points": [
       {
         "epsilon": 0.0,
-        "composite_actual": 491.6800844238843,
-        "intersection_loss": 523.9991936445783,
+        "composite_actual": 383.6507911975131,
+        "intersection_loss": 521.9993708125987,
         "solution": {
           "plan_selection": {
             "I1": "I1_P1",
@@ -38,19 +38,19 @@
           },
           "offsets_s": {
             "I1": 0.0,
-            "I2": 11.333333333332732,
-            "I3": 38.25641025640988,
-            "I4": 50.75641025640988,
-            "I5": 52.47069597069589,
-            "I6": 91.13736263736229
+            "I2": 138.58974358974433,
+            "I3": 42.25641025640993,
+            "I4": 10.012858877908904,
+            "I5": 35.72710622710699,
+            "I6": 91.55063563887174
           },
           "adjustments": {
-            "I2_P1.up.0.end": 0.0285714285714303,
-            "I2_P1.down.0.end": 0.0285714285714303,
-            "I3_P1.up.0.end": 0.02857142857142979,
-            "I3_P1.down.0.end": 0.02857142857142979,
-            "I4_P1.up.0.end": 0.19999964879990334,
-            "I4_P1.down.0.end": 0.19999964879990334,
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.021428571428571328,
+            "I3_P1.down.0.end": 0.021428571428571328,
+            "I4_P1.up.0.end": 0.1999997259636754,
+            "I4_P1.down.0.end": 0.1999997259636754,
             "I5_P1.up.0.end": 0.2,
             "I5_P1.down.0.end": 0.0
           },
@@ -59,8 +59,8 @@
               "demand": "GW_up_full",
               "slot": 1,
               "exists": true,
-              "width_s": 64.0,
-              "start_at_anchor_s": 2.999999999999602,
+              "width_s": 47.25641025641091,
+              "start_at_anchor_s": 5.0000000000001,
               "windows": {
                 "I1": 1,
                 "I2": 1,
@@ -75,8 +75,8 @@
               "demand": "RW_down_6_5",
               "slot": 1,
               "exists": true,
-              "width_s": 49.84313725490199,
-              "start_at_anchor_s": 122.47069597069597,
+              "width_s": 67.0,
+              "start_at_anchor_s": 105.72710622710699,
               "windows": {
                 "I6": 1,
                 "I5": 1
@@ -91,8 +91,8 @@
               "demand": "RW_down_4_3",
               "slot": 1,
               "exists": true,
-              "width_s": 49.96148929352475,
-              "start_at_anchor_s": 112.25641025641005,
+              "width_s": 18.782012916964984,
+              "start_at_anchor_s": 23.47439733944649,
               "windows": {
                 "I4": 1,
                 "I3": 1
@@ -100,15 +100,15 @@
               "red_instance": [
                 1,
                 1,
-                0
+                -1
               ]
             },
             {
               "demand": "RW_down_3_2",
               "slot": 1,
               "exists": true,
-              "width_s": 50.25641025641005,
-              "start_at_anchor_s": 85.33333333333337,
+              "width_s": 70.0,
+              "start_at_anchor_s": 68.5897435897442,
               "windows": {
                 "I3": 1,
                 "I2": 1
@@ -116,37 +116,21 @@
               "red_instance": [
                 1,
                 1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_2_1",
-              "slot": 1,
-              "exists": true,
-              "width_s": 29.61904761904747,
-              "start_at_anchor_s": 70.0,
-              "windows": {
-                "I2": 1,
-                "I1": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
+                -1
               ]
             }
           ],
           "constraint_violations": [
             {
               "id": "I4_up_end_soft_055",
-              "violation_s": 20.999950831986467,
-              "cost": 167.99960665589174,
+              "violation_s": 20.999961634914555,
+              "cost": 167.99969307931644,
               "owner": "intersection_loss"
             },
             {
               "id": "I4_down_end_soft_055",
-              "violation_s": 20.999950831986467,
-              "cost": 167.99960665589174,
+              "violation_s": 20.999961634914555,
+              "cost": 167.99969307931644,
               "owner": "intersection_loss"
             },
             {
@@ -156,39 +140,27 @@
               "owner": "intersection_loss"
             },
             {
-              "id": "all_green_excess_70s:I2_P1:up:0",
-              "violation_s": 4.000000000000242,
-              "cost": 0.8000000000000483,
-              "owner": "intersection_loss"
-            },
-            {
-              "id": "all_green_excess_70s:I2_P1:down:0",
-              "violation_s": 4.000000000000242,
-              "cost": 0.8000000000000483,
-              "owner": "intersection_loss"
-            },
-            {
               "id": "all_green_excess_70s:I3_P1:up:0",
-              "violation_s": 4.0000000000001705,
-              "cost": 0.8000000000000341,
+              "violation_s": 2.999999999999986,
+              "cost": 0.5999999999999972,
               "owner": "intersection_loss"
             },
             {
               "id": "all_green_excess_70s:I3_P1:down:0",
-              "violation_s": 4.0000000000001705,
-              "cost": 0.8000000000000341,
+              "violation_s": 2.999999999999986,
+              "cost": 0.5999999999999972,
               "owner": "intersection_loss"
             },
             {
               "id": "all_green_excess_70s:I4_P1:up:0",
-              "violation_s": 27.999950831986467,
-              "cost": 5.599990166397294,
+              "violation_s": 27.999961634914555,
+              "cost": 5.599992326982911,
               "owner": "intersection_loss"
             },
             {
               "id": "all_green_excess_70s:I4_P1:down:0",
-              "violation_s": 27.999950831986467,
-              "cost": 5.599990166397294,
+              "violation_s": 27.999961634914555,
+              "cost": 5.599992326982911,
               "owner": "intersection_loss"
             },
             {
@@ -199,15 +171,15 @@
             }
           ],
           "balanced_groups": {},
-          "band_reward_s": 499.6800844238843,
-          "margin_loss_s": 8.000000000000028,
-          "intersection_loss_s": 523.9991936445783
+          "band_reward_s": 392.0640641990195,
+          "margin_loss_s": 8.413273001506397,
+          "intersection_loss_s": 521.9993708125987
         }
       },
       {
-        "epsilon": 18.438005009696187,
-        "composite_actual": 473.24207941418854,
-        "intersection_loss": 1.228905204939656,
+        "epsilon": 14.38690610859731,
+        "composite_actual": 369.2638850889105,
+        "intersection_loss": 286.0541106316466,
         "solution": {
           "plan_selection": {
             "I1": "I1_P1",
@@ -219,20 +191,20 @@
           },
           "offsets_s": {
             "I1": 0.0,
-            "I2": 11.333333333333371,
-            "I3": 38.25641025641028,
-            "I4": 50.75641025641028,
-            "I5": 69.99999999999997,
-            "I6": 90.81119269136511
+            "I2": 138.5897435897444,
+            "I3": 42.25641025641136,
+            "I4": 24.399764986501715,
+            "I5": 35.72710622710729,
+            "I6": 91.55063563887722
           },
           "adjustments": {
             "I2_P1.up.0.end": 0.0,
             "I2_P1.down.0.end": 0.0,
-            "I3_P1.up.0.end": 0.0,
-            "I3_P1.down.0.end": 0.0,
-            "I4_P1.up.0.end": 0.0,
-            "I4_P1.down.0.end": 0.0,
-            "I5_P1.up.0.end": 0.04388947160498771,
+            "I3_P1.up.0.end": 0.02142857142857214,
+            "I3_P1.down.0.end": 0.02142857142857214,
+            "I4_P1.up.0.end": 0.09723611090228508,
+            "I4_P1.down.0.end": 0.09723611090228508,
+            "I5_P1.up.0.end": 0.2,
             "I5_P1.down.0.end": 0.0
           },
           "bands": [
@@ -240,8 +212,8 @@
               "demand": "GW_up_full",
               "slot": 1,
               "exists": true,
-              "width_s": 61.67383005400241,
-              "start_at_anchor_s": 3.0,
+              "width_s": 47.256410256410824,
+              "start_at_anchor_s": 5.000000000000526,
               "windows": {
                 "I1": 1,
                 "I2": 1,
@@ -256,8 +228,8 @@
               "demand": "RW_down_6_5",
               "slot": 1,
               "exists": true,
-              "width_s": 31.98766327960025,
-              "start_at_anchor_s": 140.0,
+              "width_s": 67.00000000000044,
+              "start_at_anchor_s": 105.72710622711301,
               "windows": {
                 "I6": 1,
                 "I5": 1
@@ -269,27 +241,11 @@
               ]
             },
             {
-              "demand": "RW_down_5_4",
-              "slot": 1,
-              "exists": true,
-              "width_s": 41.743589743589695,
-              "start_at_anchor_s": 120.75641025641028,
-              "windows": {
-                "I5": 1,
-                "I4": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
               "demand": "RW_down_4_3",
               "slot": 1,
               "exists": true,
-              "width_s": 25.961538461538446,
-              "start_at_anchor_s": 108.25641025641028,
+              "width_s": 4.395106808370892,
+              "start_at_anchor_s": 37.861303448040225,
               "windows": {
                 "I4": 1,
                 "I3": 1
@@ -297,15 +253,15 @@
               "red_instance": [
                 1,
                 1,
-                0
+                -1
               ]
             },
             {
               "demand": "RW_down_3_2",
               "slot": 1,
               "exists": true,
-              "width_s": 50.25641025641022,
-              "start_at_anchor_s": 81.33333333333337,
+              "width_s": 70.0,
+              "start_at_anchor_s": 68.58974358974496,
               "windows": {
                 "I3": 1,
                 "I2": 1
@@ -313,44 +269,70 @@
               "red_instance": [
                 1,
                 1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_2_1",
-              "slot": 1,
-              "exists": true,
-              "width_s": 25.619047619047706,
-              "start_at_anchor_s": 70.0,
-              "windows": {
-                "I2": 1,
-                "I1": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
+                -1
               ]
             }
           ],
           "constraint_violations": [
             {
+              "id": "I4_up_end_soft_055",
+              "violation_s": 6.613055526319911,
+              "cost": 52.90444421055929,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "I4_down_end_soft_055",
+              "violation_s": 6.613055526319911,
+              "cost": 52.90444421055929,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "I5_up_end_soft_055",
+              "violation_s": 21.0,
+              "cost": 168.0,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I3_P1:up:0",
+              "violation_s": 3.0000000000000995,
+              "cost": 0.60000000000002,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I3_P1:down:0",
+              "violation_s": 3.0000000000000995,
+              "cost": 0.60000000000002,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I4_P1:up:0",
+              "violation_s": 13.613055526319911,
+              "cost": 2.7226111052639825,
+              "owner": "intersection_loss"
+            },
+            {
+              "id": "all_green_excess_70s:I4_P1:down:0",
+              "violation_s": 13.613055526319911,
+              "cost": 2.7226111052639825,
+              "owner": "intersection_loss"
+            },
+            {
               "id": "all_green_excess_70s:I5_P1:up:0",
-              "violation_s": 6.14452602469828,
-              "cost": 1.228905204939656,
+              "violation_s": 28.0,
+              "cost": 5.6000000000000005,
               "owner": "intersection_loss"
             }
           ],
           "balanced_groups": {},
-          "band_reward_s": 483.9373996301984,
-          "margin_loss_s": 10.69532021600984,
-          "intersection_loss_s": 1.228905204939656
+          "band_reward_s": 377.67715809042545,
+          "margin_loss_s": 8.41327300151493,
+          "intersection_loss_s": 286.0541106316466
         }
       },
       {
-        "epsilon": 36.876010019392375,
-        "composite_actual": 454.80407440449244,
-        "intersection_loss": 0.2905253980715031,
+        "epsilon": 28.77381221719462,
+        "composite_actual": 354.87697898031803,
+        "intersection_loss": 0.15268517335300658,
         "solution": {
           "plan_selection": {
             "I1": "I1_P1",
@@ -362,11 +344,11 @@
           },
           "offsets_s": {
             "I1": 0.0,
-            "I2": 8.315264352995005,
-            "I3": 35.23834127607183,
-            "I4": 47.73834127607182,
-            "I5": 70.0,
-            "I6": 89.13736263736257
+            "I2": 136.5476190476189,
+            "I3": 40.25641025641049,
+            "I4": 35.97069597069593,
+            "I5": 80.47069597069593,
+            "I6": 76.35164835164834
           },
           "adjustments": {
             "I2_P1.up.0.end": 0.0,
@@ -375,16 +357,16 @@
             "I3_P1.down.0.end": 0.0,
             "I4_P1.up.0.end": 0.0,
             "I4_P1.down.0.end": 0.0,
-            "I5_P1.up.0.end": 0.010375907073982255,
-            "I5_P1.down.0.end": 0.0
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.005453041905464521
           },
           "bands": [
             {
               "demand": "GW_up_full",
               "slot": 1,
               "exists": true,
-              "width_s": 56.98193101966154,
-              "start_at_anchor_s": 3.0,
+              "width_s": 45.214285714285666,
+              "start_at_anchor_s": 4.9999999999999885,
               "windows": {
                 "I1": 1,
                 "I2": 1,
@@ -396,27 +378,11 @@
               "red_instance": null
             },
             {
-              "demand": "RW_down_6_5",
-              "slot": 1,
-              "exists": true,
-              "width_s": 30.31383322559789,
-              "start_at_anchor_s": 140.00000000000003,
-              "windows": {
-                "I6": 1,
-                "I5": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
               "demand": "RW_down_5_4",
               "slot": 1,
               "exists": true,
-              "width_s": 44.761658723928086,
-              "start_at_anchor_s": 117.73834127607182,
+              "width_s": 67.76342586676503,
+              "start_at_anchor_s": 105.97069597069593,
               "windows": {
                 "I5": 1,
                 "I4": 1
@@ -428,27 +394,11 @@
               ]
             },
             {
-              "demand": "RW_down_4_3",
-              "slot": 1,
-              "exists": true,
-              "width_s": 25.961538461539334,
-              "start_at_anchor_s": 105.23834127607182,
-              "windows": {
-                "I4": 1,
-                "I3": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
               "demand": "RW_down_3_2",
               "slot": 1,
               "exists": true,
-              "width_s": 50.25641025641009,
-              "start_at_anchor_s": 78.31526435299502,
+              "width_s": 67.04212454212492,
+              "start_at_anchor_s": 66.54761904761908,
               "windows": {
                 "I3": 1,
                 "I2": 1
@@ -456,43 +406,27 @@
               "red_instance": [
                 1,
                 1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_2_1",
-              "slot": 1,
-              "exists": true,
-              "width_s": 22.600978638709357,
-              "start_at_anchor_s": 70.0,
-              "windows": {
-                "I2": 1,
-                "I1": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
+                -1
               ]
             }
           ],
           "constraint_violations": [
             {
-              "id": "all_green_excess_70s:I5_P1:up:0",
-              "violation_s": 1.4526269903575155,
-              "cost": 0.2905253980715031,
+              "id": "all_green_excess_70s:I5_P1:down:0",
+              "violation_s": 0.7634258667650329,
+              "cost": 0.15268517335300658,
               "owner": "intersection_loss"
             }
           ],
           "balanced_groups": {},
-          "band_reward_s": 458.80407440449244,
-          "margin_loss_s": 4.0,
-          "intersection_loss_s": 0.2905253980715031
+          "band_reward_s": 360.8769789803183,
+          "margin_loss_s": 6.00000000000031,
+          "intersection_loss_s": 0.15268517335300658
         }
       },
       {
-        "epsilon": 55.31401502908856,
-        "composite_actual": 436.36606939479566,
+        "epsilon": 43.160718325791926,
+        "composite_actual": 340.49007287172014,
         "intersection_loss": 0.0,
         "solution": {
           "plan_selection": {
@@ -505,322 +439,10 @@
           },
           "offsets_s": {
             "I1": 0.0,
-            "I2": 11.33333333333345,
-            "I3": 38.256410256410355,
-            "I4": 50.75641025641028,
-            "I5": 76.47069597069601,
-            "I6": 89.13736263736277
-          },
-          "adjustments": {
-            "I2_P1.up.0.end": 0.0,
-            "I2_P1.down.0.end": 0.0,
-            "I3_P1.up.0.end": 0.0,
-            "I3_P1.down.0.end": 0.0,
-            "I4_P1.up.0.end": 0.0,
-            "I4_P1.down.0.end": 0.0,
-            "I5_P1.up.0.end": 0.0,
-            "I5_P1.down.0.end": 0.0
-          },
-          "bands": [
-            {
-              "demand": "GW_up_full",
-              "slot": 1,
-              "exists": true,
-              "width_s": 60.00000000000008,
-              "start_at_anchor_s": 3.0,
-              "windows": {
-                "I1": 1,
-                "I2": 1,
-                "I3": 1,
-                "I4": 1,
-                "I5": 1,
-                "I6": 1
-              },
-              "red_instance": null
-            },
-            {
-              "demand": "RW_down_5_4",
-              "slot": 1,
-              "exists": true,
-              "width_s": 36.52907305779933,
-              "start_at_anchor_s": 120.75641025641109,
-              "windows": {
-                "I5": 1,
-                "I4": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_4_3",
-              "slot": 1,
-              "exists": true,
-              "width_s": 25.961538461538368,
-              "start_at_anchor_s": 108.25641025641036,
-              "windows": {
-                "I4": 1,
-                "I3": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_3_2",
-              "slot": 1,
-              "exists": true,
-              "width_s": 50.256410256410255,
-              "start_at_anchor_s": 81.33333333333344,
-              "windows": {
-                "I3": 1,
-                "I2": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_2_1",
-              "slot": 1,
-              "exists": true,
-              "width_s": 25.619047619047755,
-              "start_at_anchor_s": 70.0,
-              "windows": {
-                "I2": 1,
-                "I1": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            }
-          ],
-          "constraint_violations": [],
-          "balanced_groups": {},
-          "band_reward_s": 438.36606939479617,
-          "margin_loss_s": 2.0000000000005187,
-          "intersection_loss_s": 0.0
-        }
-      },
-      {
-        "epsilon": 73.75202003878475,
-        "composite_actual": 417.92806438509996,
-        "intersection_loss": 0.0,
-        "solution": {
-          "plan_selection": {
-            "I1": "I1_P1",
-            "I2": "I2_P1",
-            "I3": "I3_P1",
-            "I4": "I4_P1",
-            "I5": "I5_P1",
-            "I6": "I6_P1"
-          },
-          "offsets_s": {
-            "I1": 0.0,
-            "I2": 11.333333333333371,
-            "I3": 40.25641025641028,
-            "I4": 52.75641025641032,
-            "I5": 78.47069597069594,
-            "I6": 91.13736263736277
-          },
-          "adjustments": {
-            "I2_P1.up.0.end": 0.0,
-            "I2_P1.down.0.end": 0.0,
-            "I3_P1.up.0.end": 0.0,
-            "I3_P1.down.0.end": 0.0,
-            "I4_P1.up.0.end": 0.0,
-            "I4_P1.down.0.end": 0.0,
-            "I5_P1.up.0.end": 0.0,
-            "I5_P1.down.0.end": 0.0
-          },
-          "bands": [
-            {
-              "demand": "GW_up_full",
-              "slot": 1,
-              "exists": true,
-              "width_s": 60.0,
-              "start_at_anchor_s": 5.0,
-              "windows": {
-                "I1": 1,
-                "I2": 1,
-                "I3": 1,
-                "I4": 1,
-                "I5": 1,
-                "I6": 1
-              },
-              "red_instance": null
-            },
-            {
-              "demand": "RW_down_5_4",
-              "slot": 1,
-              "exists": true,
-              "width_s": 48.21428571428562,
-              "start_at_anchor_s": 122.75641025641032,
-              "windows": {
-                "I5": 1,
-                "I4": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_3_2",
-              "slot": 1,
-              "exists": true,
-              "width_s": 52.25641025641028,
-              "start_at_anchor_s": 81.33333333333337,
-              "windows": {
-                "I3": 1,
-                "I2": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_2_1",
-              "slot": 1,
-              "exists": true,
-              "width_s": 19.4573684144043,
-              "start_at_anchor_s": 70.0,
-              "windows": {
-                "I2": 1,
-                "I1": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            }
-          ],
-          "constraint_violations": [],
-          "balanced_groups": {},
-          "band_reward_s": 419.9280643851002,
-          "margin_loss_s": 2.000000000000213,
-          "intersection_loss_s": 0.0
-        }
-      },
-      {
-        "epsilon": 92.19002504848095,
-        "composite_actual": 399.49005937540403,
-        "intersection_loss": 0.0,
-        "solution": {
-          "plan_selection": {
-            "I1": "I1_P1",
-            "I2": "I2_P1",
-            "I3": "I3_P1",
-            "I4": "I4_P1",
-            "I5": "I5_P1",
-            "I6": "I6_P1"
-          },
-          "offsets_s": {
-            "I1": 0.0,
-            "I2": 10.843015035687415,
-            "I3": 39.766091958764314,
-            "I4": 50.75641025641038,
-            "I5": 77.98037767305004,
-            "I6": 89.13736263736267
-          },
-          "adjustments": {
-            "I2_P1.up.0.end": 0.0,
-            "I2_P1.down.0.end": 0.0,
-            "I3_P1.up.0.end": 0.0,
-            "I3_P1.down.0.end": 0.0,
-            "I4_P1.up.0.end": 0.0,
-            "I4_P1.down.0.end": 0.0,
-            "I5_P1.up.0.end": 0.0,
-            "I5_P1.down.0.end": 0.0
-          },
-          "bands": [
-            {
-              "demand": "GW_up_full",
-              "slot": 1,
-              "exists": true,
-              "width_s": 61.509681702354044,
-              "start_at_anchor_s": 3.0000000000000004,
-              "windows": {
-                "I1": 1,
-                "I2": 1,
-                "I3": 1,
-                "I4": 1,
-                "I5": 1,
-                "I6": 1
-              },
-              "red_instance": null
-            },
-            {
-              "demand": "RW_down_5_4",
-              "slot": 1,
-              "exists": true,
-              "width_s": 49.72396741663968,
-              "start_at_anchor_s": 120.75641025641032,
-              "windows": {
-                "I5": 1,
-                "I4": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_3_2",
-              "slot": 1,
-              "exists": true,
-              "width_s": 52.25641025641028,
-              "start_at_anchor_s": 80.84301503568742,
-              "windows": {
-                "I3": 1,
-                "I2": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            }
-          ],
-          "constraint_violations": [],
-          "balanced_groups": {},
-          "band_reward_s": 409.5287861848202,
-          "margin_loss_s": 10.038726809416147,
-          "intersection_loss_s": 0.0
-        }
-      },
-      {
-        "epsilon": 110.62803005817712,
-        "composite_actual": 381.0520543657077,
-        "intersection_loss": 0.0,
-        "solution": {
-          "plan_selection": {
-            "I1": "I1_P1",
-            "I2": "I2_P1",
-            "I3": "I3_P1",
-            "I4": "I4_P1",
-            "I5": "I5_P1",
-            "I6": "I6_P1"
-          },
-          "offsets_s": {
-            "I1": 0.0,
-            "I2": 11.333333333333371,
-            "I3": 38.25641025641028,
-            "I4": 50.75641025641028,
-            "I5": 76.4706959706959,
+            "I2": 134.5476190476191,
+            "I3": 38.25641025641026,
+            "I4": 33.970695970696,
+            "I5": 78.47069597069596,
             "I6": 89.13736263736268
           },
           "adjustments": {
@@ -838,7 +460,7 @@
               "demand": "GW_up_full",
               "slot": 1,
               "exists": true,
-              "width_s": 60.0,
+              "width_s": 45.21428571428572,
               "start_at_anchor_s": 3.0,
               "windows": {
                 "I1": 1,
@@ -854,8 +476,96 @@
               "demand": "RW_down_5_4",
               "slot": 1,
               "exists": true,
-              "width_s": 48.21428571428562,
-              "start_at_anchor_s": 120.75641025641028,
+              "width_s": 55.37651975816692,
+              "start_at_anchor_s": 103.97069597069597,
+              "windows": {
+                "I5": 1,
+                "I4": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_3_2",
+              "slot": 1,
+              "exists": true,
+              "width_s": 67.04212454212458,
+              "start_at_anchor_s": 64.54761904761911,
+              "windows": {
+                "I3": 1,
+                "I2": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                -1
+              ]
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 348.49007287172014,
+          "margin_loss_s": 7.999999999999972,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 57.54762443438924,
+        "composite_actual": 326.1031667631227,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 135.50060266055863,
+            "I3": 42.167269327225256,
+            "I4": 28.705730865686803,
+            "I5": 76.2057308656868,
+            "I6": 69.08668324663921
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 38.03846153846155,
+              "start_at_anchor_s": 4.910859070814979,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_5_4",
+              "slot": 1,
+              "exists": true,
+              "width_s": 70.0,
+              "start_at_anchor_s": 98.7057308656868,
               "windows": {
                 "I5": 1,
                 "I4": 1
@@ -870,8 +580,8 @@
               "demand": "RW_down_4_3",
               "slot": 1,
               "exists": true,
-              "width_s": 25.961538461538154,
-              "start_at_anchor_s": 108.2564102564104,
+              "width_s": 0.0,
+              "start_at_anchor_s": 42.167269327225256,
               "windows": {
                 "I4": 1,
                 "I3": 1
@@ -879,36 +589,36 @@
               "red_instance": [
                 1,
                 1,
-                0
+                -1
               ]
             },
             {
-              "demand": "RW_down_2_1",
+              "demand": "RW_down_3_2",
               "slot": 1,
               "exists": true,
-              "width_s": 8.876230189884154,
-              "start_at_anchor_s": 70.0,
+              "width_s": 70.0,
+              "start_at_anchor_s": 65.50060266055863,
               "windows": {
-                "I2": 1,
-                "I1": 1
+                "I3": 1,
+                "I2": 1
               },
               "red_instance": [
                 1,
                 1,
-                0
+                -1
               ]
             }
           ],
           "constraint_violations": [],
           "balanced_groups": {},
-          "band_reward_s": 383.05205436570793,
-          "margin_loss_s": 2.000000000000206,
+          "band_reward_s": 330.19230769230774,
+          "margin_loss_s": 4.089140929185014,
           "intersection_loss_s": 0.0
         }
       },
       {
-        "epsilon": 129.06603506787332,
-        "composite_actual": 362.6140493560113,
+        "epsilon": 71.93453054298655,
+        "composite_actual": 311.7162606545255,
         "intersection_loss": 0.0,
         "solution": {
           "plan_selection": {
@@ -921,11 +631,11 @@
           },
           "offsets_s": {
             "I1": 0.0,
-            "I2": 11.333333333333371,
-            "I3": 38.25641025641028,
-            "I4": 50.75641025641028,
-            "I5": 76.47069597069594,
-            "I6": 89.13736263736236
+            "I2": 0.0,
+            "I3": 40.25641025641028,
+            "I4": 33.97069597069596,
+            "I5": 78.47069597069596,
+            "I6": 74.35164835164836
           },
           "adjustments": {
             "I2_P1.up.0.end": 0.0,
@@ -942,7 +652,102 @@
               "demand": "GW_up_full",
               "slot": 1,
               "exists": true,
-              "width_s": 60.0,
+              "width_s": 43.21428571428568,
+              "start_at_anchor_s": 5.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            },
+            {
+              "demand": "RW_down_5_4",
+              "slot": 1,
+              "exists": true,
+              "width_s": 51.10637054463524,
+              "start_at_anchor_s": 103.97069597069594,
+              "windows": {
+                "I5": 1,
+                "I4": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            },
+            {
+              "demand": "RW_down_3_2",
+              "slot": 1,
+              "exists": true,
+              "width_s": 63.58974358974365,
+              "start_at_anchor_s": 70.0,
+              "windows": {
+                "I3": 1,
+                "I2": 1
+              },
+              "red_instance": [
+                1,
+                1,
+                0
+              ]
+            }
+          ],
+          "constraint_violations": [
+            {
+              "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,1,1]",
+              "violation_s": 3.410256410256352,
+              "cost": 17.05128205128176,
+              "owner": "composite"
+            }
+          ],
+          "balanced_groups": {},
+          "band_reward_s": 330.7675427058073,
+          "margin_loss_s": 2.000000000000007,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 86.32143665158385,
+        "composite_actual": 297.3293545459281,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 11.199204242519002,
+            "I3": 38.12228116559591,
+            "I4": 50.62228116559591,
+            "I5": 76.33656687988157,
+            "I6": 89.00323354654832
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 59.86587090918563,
               "start_at_anchor_s": 3.0,
               "windows": {
                 "I1": 1,
@@ -953,50 +758,18 @@
                 "I6": 1
               },
               "red_instance": null
-            },
-            {
-              "demand": "RW_down_3_2",
-              "slot": 1,
-              "exists": true,
-              "width_s": 50.2564102564088,
-              "start_at_anchor_s": 81.33333333333461,
-              "windows": {
-                "I3": 1,
-                "I2": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_2_1",
-              "slot": 1,
-              "exists": true,
-              "width_s": 14.357639099602949,
-              "start_at_anchor_s": 70.0,
-              "windows": {
-                "I2": 1,
-                "I1": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
             }
           ],
           "constraint_violations": [],
           "balanced_groups": {},
-          "band_reward_s": 364.6140493560117,
-          "margin_loss_s": 2.000000000000391,
+          "band_reward_s": 299.32935454592814,
+          "margin_loss_s": 2.000000000000057,
           "intersection_loss_s": 0.0
         }
       },
       {
-        "epsilon": 147.5040400775695,
-        "composite_actual": 344.1760443463156,
+        "epsilon": 100.70834276018117,
+        "composite_actual": 282.94244843733077,
         "intersection_loss": 0.0,
         "solution": {
           "plan_selection": {
@@ -1009,11 +782,11 @@
           },
           "offsets_s": {
             "I1": 0.0,
-            "I2": 11.333333333333396,
-            "I3": 35.17550190955615,
-            "I4": 49.67550190955613,
-            "I5": 75.38978762384181,
-            "I6": 88.05645429050855
+            "I2": 8.321823020799535,
+            "I3": 35.24489994387644,
+            "I4": 47.74489994387644,
+            "I5": 73.45918565816211,
+            "I6": 86.12585232482886
           },
           "adjustments": {
             "I2_P1.up.0.end": 0.0,
@@ -1030,8 +803,8 @@
               "demand": "GW_up_full",
               "slot": 1,
               "exists": true,
-              "width_s": 58.91909165314587,
-              "start_at_anchor_s": 3.000000000000002,
+              "width_s": 56.98848968746616,
+              "start_at_anchor_s": 3.0,
               "windows": {
                 "I1": 1,
                 "I2": 1,
@@ -1041,44 +814,68 @@
                 "I6": 1
               },
               "red_instance": null
-            },
-            {
-              "demand": "RW_down_4_3",
-              "slot": 1,
-              "exists": true,
-              "width_s": 27.961538461538623,
-              "start_at_anchor_s": 105.17550190955626,
-              "windows": {
-                "I4": 1,
-                "I3": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
-            },
-            {
-              "demand": "RW_down_2_1",
-              "slot": 1,
-              "exists": true,
-              "width_s": 25.619047619047716,
-              "start_at_anchor_s": 70.0,
-              "windows": {
-                "I2": 1,
-                "I1": 1
-              },
-              "red_instance": [
-                1,
-                1,
-                0
-              ]
             }
           ],
           "constraint_violations": [],
           "balanced_groups": {},
-          "band_reward_s": 348.1760443463157,
-          "margin_loss_s": 4.000000000000059,
+          "band_reward_s": 284.9424484373308,
+          "margin_loss_s": 2.0000000000000284,
+          "intersection_loss_s": 0.0
+        }
+      },
+      {
+        "epsilon": 115.09524886877848,
+        "composite_actual": 268.5555423287335,
+        "intersection_loss": 0.0,
+        "solution": {
+          "plan_selection": {
+            "I1": "I1_P1",
+            "I2": "I2_P1",
+            "I3": "I3_P1",
+            "I4": "I4_P1",
+            "I5": "I5_P1",
+            "I6": "I6_P1"
+          },
+          "offsets_s": {
+            "I1": 0.0,
+            "I2": 5.444441799080074,
+            "I3": 32.36751872215698,
+            "I4": 44.86751872215698,
+            "I5": 70.58180443644264,
+            "I6": 83.24847110310938
+          },
+          "adjustments": {
+            "I2_P1.up.0.end": 0.0,
+            "I2_P1.down.0.end": 0.0,
+            "I3_P1.up.0.end": 0.0,
+            "I3_P1.down.0.end": 0.0,
+            "I4_P1.up.0.end": 0.0,
+            "I4_P1.down.0.end": 0.0,
+            "I5_P1.up.0.end": 0.0,
+            "I5_P1.down.0.end": 0.0
+          },
+          "bands": [
+            {
+              "demand": "GW_up_full",
+              "slot": 1,
+              "exists": true,
+              "width_s": 54.1111084657467,
+              "start_at_anchor_s": 3.0,
+              "windows": {
+                "I1": 1,
+                "I2": 1,
+                "I3": 1,
+                "I4": 1,
+                "I5": 1,
+                "I6": 1
+              },
+              "red_instance": null
+            }
+          ],
+          "constraint_violations": [],
+          "balanced_groups": {},
+          "band_reward_s": 270.5555423287335,
+          "margin_loss_s": 2.0000000000000284,
           "intersection_loss_s": 0.0
         }
       }

@@ -778,7 +778,14 @@
       "topk_grids": 1
     },
     "allow_window_sharing": false,
-    "balanced_groups": []
+    "balanced_groups": [],
+    "red_boundary_default": {
+      "start": {
+        "free_s": 3.0,
+        "coef": 5.0
+      },
+      "end": null
+    }
   },
   "grid": {
     "cycles_s": [
