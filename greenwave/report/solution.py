@@ -183,6 +183,23 @@ class SolutionDecoder:
                     reward += b.weight * band.width_s
         margin_pen = self._actual_margin_penalty(values, bands)
 
+        # 红波边界亲和损失：直接从 slack 变量值读取，目标里已最小化它们。
+        red_boundary_pen = 0.0
+        for ref in meta.red_boundary:
+            for side, vars_, coef in (("start", ref.start_vars, ref.start_coef),
+                                      ("end", ref.end_vars, ref.end_coef)):
+                if coef <= 0:
+                    continue
+                for h in vars_:
+                    val = float(values[h.index])
+                    if val <= 1e-9:
+                        continue
+                    cost = coef * val
+                    red_boundary_pen += cost
+                    violations.append(ViolationRecord(
+                        f"red_boundary_{side}:{ref.demand_id}:{self.model.vars.names[h.index]}",
+                        float(val), float(cost), "composite"))
+
         # 均衡组：实际 z 值 + min_existing 软约束的短缺罚。
         balanced_values: dict[str, float] = {}
         balanced_reward = 0.0
@@ -195,7 +212,7 @@ class SolutionDecoder:
                     and gm.deficit is not None and pen > 0):
                 balanced_reward -= pen * float(values[gm.deficit.index])
 
-        composite = reward - margin_pen - composite_soft + balanced_reward
+        composite = reward - margin_pen - composite_soft + balanced_reward - red_boundary_pen
         return SolutionRecord(dict(selection), offsets, adjustments, tuple(bands),
                               tuple(violations), float(composite), float(loss),
                               balanced_values, float(reward), float(margin_pen))

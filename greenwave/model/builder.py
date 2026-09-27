@@ -34,7 +34,8 @@ from ..schema.models import (BandDemandSpec, ConstraintSpec, ConstraintTemplate,
 from .constraints import ConstraintMeta, ConstraintStore
 from .expressions import LinearExpr
 from .meta import (BalancedGroupModel, BigMTable, GreenDemandModel,
-                   MarginSlackRef, ModelMeta, RedDemandModel, SoftPenaltyRef)
+                   MarginSlackRef, ModelMeta, RedBoundarySlackRef,
+                   RedDemandModel, SoftPenaltyRef)
 from .variables import GVarType, VarHandle, VariableRegistry
 from .windows import EffectiveWindowBuilder, EffectiveWindowSet, RedWindowBuilder
 
@@ -98,6 +99,11 @@ class ArterialModel:
         for m in self.meta.margins:
             for h in list(m.s_vars) + list(m.e_vars):
                 expr.add(h, -m.coef)
+        for ref in self.meta.red_boundary:
+            for h in ref.start_vars:
+                expr.add(h, -ref.start_coef)
+            for h in ref.end_vars:
+                expr.add(h, -ref.end_coef)
         for ref in self.meta.soft:
             if ref.owner == "composite":
                 expr.add(self.vars.by_name(ref_label(ref)), -ref.coef)
@@ -1097,6 +1103,18 @@ class ModelBuilder:
                                     ag_slots, ar_keys)
             self.meta.red_demands[b.id] = rmodel
 
+            # 红波带边界亲和性：红波带起点尽量贴上游绿窗起点、终点尽量贴上游绿窗终点。
+            rb = self.problem.red_boundary_for(b)
+            rb_ref = None
+            if rb.enabled and ((rb.start is not None and rb.start.coef > 0)
+                               or (rb.end is not None and rb.end.coef > 0)):
+                rb_ref = RedBoundarySlackRef(
+                    demand_id=b.id,
+                    start_coef=rb.start.coef if rb.start is not None else 0.0,
+                    end_coef=rb.end.coef if rb.end is not None else 0.0,
+                )
+                self.meta.red_boundary.append(rb_ref)
+
             M = self.m.containment
             # 上游窗口宽度上界，用于 C13 有效不等式。
             up_bounds = self._window_slot_bounds(gw_up)
@@ -1148,6 +1166,70 @@ class ModelBuilder:
                     self.cons.add(row, "<=", tau + M,
                                   ConstraintMeta("C9", f"red up upper {b.id}/{q}/{g}",
                                                  {"demand": b.id, "slot": str(q)}))
+
+                # C9_RED_EDGE：红波带边界与上游绿窗边界的距离损失/约束。
+                #
+                # gap_start = u - (phi_i + s_g + tau)
+                # gap_end   = (phi_i + e_g + tau) - (u + beta)
+                #
+                # 两者都希望尽量接近 0；超过 free_s 的部分用 sigma 惩罚，
+                # 若配置 hard_max_s 则再给距离加上硬上限。
+                if rb.enabled:
+                    M_edge = self.m.soft
+                    M_hard = self.m.containment
+                    for g in ag_slots:
+                        av = ag[(q, g)]
+                        start_spec = rb.start
+                        end_spec = rb.end
+
+                        if start_spec is not None:
+                            if start_spec.coef > 0:
+                                sigma_s = self.vars.add(
+                                    f"red_edge_start[{b.id},{q},{g}]", 0.0,
+                                    self.m.containment * 2.0, GVarType.CONTINUOUS,
+                                    {"kind": "red_boundary_slack", "demand": b.id,
+                                     "slot": q, "up_window": g, "side": "start"})
+                                if rb_ref is not None:
+                                    rb_ref.start_vars.append(sigma_s)
+                                row = LinearExpr.of(sigma_s, 1.0).add(u[q], -1.0)
+                                row.add(self.meta.phi[up_node], 1.0).add(gw_up.s[g], 1.0)
+                                row.add(av, -M_edge).add_const(tau)
+                                self.cons.add(row, ">=", -start_spec.free_s - M_edge,
+                                              ConstraintMeta("C9_RED_EDGE",
+                                                             f"red edge start {b.id}/{q}/{g}",
+                                                             {"demand": b.id, "slot": str(q)}))
+                            if start_spec.hard_max_s is not None:
+                                row = LinearExpr.of(u[q], 1.0).add(self.meta.phi[up_node], -1.0)
+                                row.add(gw_up.s[g], -1.0).add(av, M_hard).add_const(-tau)
+                                self.cons.add(row, "<=", start_spec.hard_max_s + M_hard,
+                                              ConstraintMeta("C9_RED_EDGE_HARD",
+                                                             f"red edge start max {b.id}/{q}/{g}",
+                                                             {"demand": b.id, "slot": str(q)}))
+
+                        if end_spec is not None:
+                            if end_spec.coef > 0:
+                                sigma_e = self.vars.add(
+                                    f"red_edge_end[{b.id},{q},{g}]", 0.0,
+                                    self.m.containment * 2.0, GVarType.CONTINUOUS,
+                                    {"kind": "red_boundary_slack", "demand": b.id,
+                                     "slot": q, "up_window": g, "side": "end"})
+                                if rb_ref is not None:
+                                    rb_ref.end_vars.append(sigma_e)
+                                row = LinearExpr.of(sigma_e, 1.0).add(u[q], 1.0)
+                                row.add(beta[q], 1.0).add(self.meta.phi[up_node], -1.0)
+                                row.add(gw_up.e[g], -1.0).add(av, -M_edge).add_const(-tau)
+                                self.cons.add(row, ">=", -end_spec.free_s - M_edge,
+                                              ConstraintMeta("C9_RED_EDGE",
+                                                             f"red edge end {b.id}/{q}/{g}",
+                                                             {"demand": b.id, "slot": str(q)}))
+                            if end_spec.hard_max_s is not None:
+                                row = LinearExpr.of(self.meta.phi[up_node], 1.0)
+                                row.add(gw_up.e[g], 1.0).add(u[q], -1.0).add(beta[q], -1.0)
+                                row.add(av, M_hard).add_const(tau)
+                                self.cons.add(row, "<=", end_spec.hard_max_s + M_hard,
+                                              ConstraintMeta("C9_RED_EDGE_HARD",
+                                                             f"red edge end max {b.id}/{q}/{g}",
+                                                             {"demand": b.id, "slot": str(q)}))
 
                 # 下游两条包含约束，只挂 ar；k 是下游红窗的周期偏移。
                 for (r, k) in ar_keys:

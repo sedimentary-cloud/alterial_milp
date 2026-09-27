@@ -593,6 +593,64 @@ class MarginSpec:
                    _num(obj.get("hard_min_s", 0.0), "hard_min_s"))
 
 
+# 红波带边界亲和性配置：红波带边界离上游绿灯区间边界多远开始罚。
+@dataclass(frozen=True)
+class RedEdgeSpec:
+    free_s: float = 0.0
+    hard_max_s: float | None = None
+    coef: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.free_s < 0:
+            raise ValueError("red edge free_s must be >= 0")
+        if self.coef < 0:
+            raise ValueError("red edge coef must be >= 0")
+        if self.hard_max_s is not None and self.hard_max_s < self.free_s:
+            raise ValueError("red edge hard_max_s must be >= free_s")
+
+    @classmethod
+    def from_obj(cls, obj: Any) -> "RedEdgeSpec | None":
+        if isinstance(obj, RedEdgeSpec):
+            return obj
+        if obj is None:
+            return None
+        if not isinstance(obj, Mapping):
+            raise ValueError(f"red edge spec must be an object, got {obj!r}")
+        hard = obj.get("hard_max_s")
+        return cls(
+            free_s=_num(obj.get("free_s", 0.0), "free_s"),
+            hard_max_s=(_num(hard, "hard_max_s") if hard is not None else None),
+            coef=_num(obj.get("coef", 1.0), "coef"),
+        )
+
+
+@dataclass(frozen=True)
+class RedBoundarySpec:
+    start: RedEdgeSpec | None = None
+    end: RedEdgeSpec | None = None
+
+    def __post_init__(self) -> None:
+        # 两端都可以为空；全空表示不启用。
+        pass
+
+    @property
+    def enabled(self) -> bool:
+        return self.start is not None or self.end is not None
+
+    @classmethod
+    def from_obj(cls, obj: Any) -> "RedBoundarySpec":
+        if isinstance(obj, RedBoundarySpec):
+            return obj
+        if obj is None:
+            return cls()
+        if not isinstance(obj, Mapping):
+            raise ValueError(f"red boundary spec must be an object, got {obj!r}")
+        return cls(
+            start=RedEdgeSpec.from_obj(obj.get("start")),
+            end=RedEdgeSpec.from_obj(obj.get("end")),
+        )
+
+
 # 一条优化需求：绿波带或红波带。
 @dataclass(frozen=True)
 class BandDemandSpec:
@@ -603,11 +661,14 @@ class BandDemandSpec:
     max_bands: int | None = None
     weight: float = 1.0
     margin: MarginSpec | None = None
+    red_boundary: RedBoundarySpec | None = None
 
     def __post_init__(self) -> None:
         if self.type not in ("green", "red"):
             raise ValueError("demand type must be green/red")
         _check_direction(self.direction)
+        if self.red_boundary is not None and self.type != "red":
+            raise ValueError(f"red_boundary is only valid for red demand {self.id!r}")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "BandDemandSpec":
@@ -621,6 +682,8 @@ class BandDemandSpec:
             max_bands=int(obj["max_bands"]) if obj.get("max_bands") is not None else None,
             weight=_num(obj.get("weight", 1.0), "weight"),
             margin=MarginSpec.from_obj(obj.get("margin")) if obj.get("margin") is not None else None,
+            red_boundary=(RedBoundarySpec.from_obj(obj.get("red_boundary"))
+                          if obj.get("red_boundary") is not None else None),
         )
 
 
@@ -706,6 +769,7 @@ class ParetoConfig:
 class ObjectiveConfig:
     band_demands: tuple[BandDemandSpec, ...]
     margin_default: MarginSpec = field(default_factory=MarginSpec)
+    red_boundary_default: RedBoundarySpec = field(default_factory=RedBoundarySpec)
     pareto: ParetoConfig = field(default_factory=ParetoConfig)
     allow_window_sharing: bool = False
     balanced_groups: tuple[BalancedGroupSpec, ...] = ()
@@ -717,6 +781,7 @@ class ObjectiveConfig:
         return cls(
             band_demands=tuple(BandDemandSpec.from_obj(d) for d in obj.get("band_demands", ())),
             margin_default=MarginSpec.from_obj(obj.get("margin_default")),
+            red_boundary_default=RedBoundarySpec.from_obj(obj.get("red_boundary_default")),
             pareto=ParetoConfig.from_obj(obj.get("pareto")),
             allow_window_sharing=bool(obj.get("allow_window_sharing", False)),
             balanced_groups=tuple(BalancedGroupSpec.from_obj(g)
@@ -819,6 +884,11 @@ class ProblemInput:
     def margin_for(self, demand: BandDemandSpec) -> MarginSpec:
         return demand.margin if demand.margin is not None else self.objective.margin_default
 
+    def red_boundary_for(self, demand: BandDemandSpec) -> RedBoundarySpec:
+        if demand.red_boundary is not None:
+            return demand.red_boundary
+        return self.objective.red_boundary_default
+
     def validate_all(self) -> list[ValidationIssue]:
         from .validation import validate_problem
         return validate_problem(self)
@@ -907,11 +977,35 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
                     "coef": b.margin.coef,
                     "hard_min_s": b.margin.hard_min_s,
                 },
+                "red_boundary": None if b.red_boundary is None else {
+                    "start": None if b.red_boundary.start is None else {
+                        "free_s": b.red_boundary.start.free_s,
+                        "hard_max_s": b.red_boundary.start.hard_max_s,
+                        "coef": b.red_boundary.start.coef,
+                    },
+                    "end": None if b.red_boundary.end is None else {
+                        "free_s": b.red_boundary.end.free_s,
+                        "hard_max_s": b.red_boundary.end.hard_max_s,
+                        "coef": b.red_boundary.end.coef,
+                    },
+                },
             } for b in self.objective.band_demands],
             "margin_default": {
                 "delta_min_s": self.objective.margin_default.delta_min_s,
                 "coef": self.objective.margin_default.coef,
                 "hard_min_s": self.objective.margin_default.hard_min_s,
+            },
+            "red_boundary_default": {
+                "start": None if self.objective.red_boundary_default.start is None else {
+                    "free_s": self.objective.red_boundary_default.start.free_s,
+                    "hard_max_s": self.objective.red_boundary_default.start.hard_max_s,
+                    "coef": self.objective.red_boundary_default.start.coef,
+                },
+                "end": None if self.objective.red_boundary_default.end is None else {
+                    "free_s": self.objective.red_boundary_default.end.free_s,
+                    "hard_max_s": self.objective.red_boundary_default.end.hard_max_s,
+                    "coef": self.objective.red_boundary_default.end.coef,
+                },
             },
             "pareto": {"num_points": self.objective.pareto.num_points,
                        "relax_max": self.objective.pareto.relax_max,
@@ -948,7 +1042,8 @@ __all__ = [
     "Direction", "Side", "Unit", "WindowSpec", "EndpointRange", "WindowAdjustSpec",
     "AtomRef", "LinearTerm", "SoftPenalty", "ConstraintSpec",
     "ConstraintScope", "ConstraintTemplate", "PlanSpec",
-    "SegmentSpec", "CorridorSpec", "MarginSpec", "BandDemandSpec",
+    "SegmentSpec", "CorridorSpec", "MarginSpec", "RedEdgeSpec", "RedBoundarySpec",
+    "BandDemandSpec",
     "BalancedGroupSpec", "ParetoConfig", "ObjectiveConfig", "GridConfig", "HeuristicConfig",
     "SolverConfig", "ProblemInput",
 ]

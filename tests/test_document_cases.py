@@ -179,6 +179,53 @@ class TestDocumentCases(unittest.TestCase):
         sol = out["pareto"]["points"][0]["solution"]
         self.assertAlmostEqual(sol["intersection_loss_s"], 18.0, places=4)
 
+    # Red band boundary affinity: penalize red band edges far from upstream green edges.
+    def test_red_boundary_affinity_loss(self):
+        corridor = {"corridor_id": "red_boundary", "intersections": ["I1", "I2"],
+                    "segments": [_seg("I1", "I2", dist=200.0, v=10.0)]}
+        plans = [_plan("I1", [[0.0, 0.45]], [[0.0, 0.45]]),
+                 _plan("I2", [[0.0, 0.80]], [[0.0, 0.80]])]
+        demands = [{"id": "RW_up", "type": "red", "direction": "up",
+                    "nodes": ["I1", "I2"], "max_bands": 1, "weight": 3.0}]
+        d = _base_problem(plans=plans, demands=demands, margin=0.0, corridor=corridor)
+        d["objective"]["red_boundary_default"] = {
+            "start": {"free_s": 0.0, "coef": 1.0},
+            "end": {"free_s": 0.0, "coef": 1.0},
+        }
+        out = run(d)
+        grid = out["grid_results"][0]
+        self.assertEqual(grid["status"], "optimal")
+        sol = out["pareto"]["points"][0]["solution"]
+        red_edge_viols = [v for v in sol["constraint_violations"]
+                          if v["id"].startswith("red_boundary")]
+        self.assertTrue(red_edge_viols)
+        self.assertTrue(all(v["owner"] == "composite" for v in red_edge_viols))
+        # composite = weight * band - red boundary loss
+        boundary_loss = sum(v["cost"] for v in red_edge_viols)
+        self.assertAlmostEqual(grid["composite_best"],
+                               grid["bandwidth_objective_s"] - boundary_loss,
+                               places=3)
+
+    def test_red_boundary_hard_max_can_be_infeasible(self):
+        corridor = {"corridor_id": "red_boundary_hard", "intersections": ["I1", "I2"],
+                    "segments": [_seg("I1", "I2", dist=200.0, v=10.0)]}
+        plans = [_plan("I1", [[0.0, 0.45]], [[0.0, 0.45]]),
+                 _plan("I2", [[0.0, 0.80]], [[0.0, 0.80]])]
+        demands = [{"id": "RW_up", "type": "red", "direction": "up",
+                    "nodes": ["I1", "I2"], "max_bands": 1, "weight": 3.0}]
+        d = _base_problem(plans=plans, demands=demands, margin=0.0, corridor=corridor)
+        d["objective"]["red_boundary_default"] = {
+            "start": {"free_s": 0.0, "hard_max_s": 0.0, "coef": 0.0},
+            "end": {"free_s": 0.0, "hard_max_s": 0.0, "coef": 0.0},
+        }
+        d["global_constraints"] = [{
+            "id": "force_red_band",
+            "terms": [{"atom": {"kind": "bandwidth", "demand": "RW_up"}, "coef": 1.0}],
+            "sense": ">=", "rhs": 1.0, "hard": True,
+        }]
+        out = run(d)
+        self.assertEqual(out["grid_results"][0]["status"], "infeasible")
+
     # T6: adjustable endpoint + intersection-loss soft constraint + epsilon scan
     def test_t6_adjustable_soft_pareto(self):
         soft = [{"id": "endsoft", "terms": [{
