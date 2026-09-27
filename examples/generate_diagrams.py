@@ -229,7 +229,7 @@ def _run_standard_objective_scenarios() -> None:
     for i in range(len(nodes) - 1, 0, -1):
         down_red_demands.append(_standard_demand(
             f"RW_down_{i + 1}_{i}", "red", "down",
-            [nodes[i], nodes[i - 1]], weight=1.0))
+            [nodes[i], nodes[i - 1]], weight=0.6))
     scenarios.append((
         "standard_case_02_single_green_single_red_sum",
         "Standard Case 2: single green + down red waves, max bandwidth sum",
@@ -274,8 +274,20 @@ def _run_standard_objective_scenarios() -> None:
         problem["objective"]["balanced_groups"] = balanced_groups
         problem["objective"]["margin_default"] = {"delta_min_s": 0.0, "coef": 0.0}
         problem["objective"]["pareto"] = {"num_points": 0, "relax_max": 0.0, "topk_grids": 0}
-        # 这些是 objective 对照场景，去掉只针对原上行带宽的 global constraints。
+        # 这些是 objective 对照场景，默认去掉只针对原上行带宽的 global constraints。
         problem["global_constraints"] = []
+        # Case 2 额外要求：全局上行绿波带宽 >= 15s。
+        if name == "standard_case_02_single_green_single_red_sum":
+            problem["global_constraints"] = [{
+                "id": "up_green_bandwidth_min_15",
+                "terms": [{
+                    "atom": {"kind": "bandwidth", "demand": "GW_up_full"},
+                    "coef": 1.0,
+                }],
+                "sense": ">=",
+                "rhs": 15.0,
+                "hard": True,
+            }]
         problem["grid"] = {"cycles_s": [140.0], "speed_ratios": [1.0]}
         problem["solver"]["heuristic"]["enabled"] = False
         problem["solver"]["num_workers"] = 1
