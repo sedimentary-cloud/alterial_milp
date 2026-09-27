@@ -706,8 +706,9 @@
         "max_bands": 1,
         "weight": 5.0,
         "margin": {
-          "delta_min_s": 2.0,
-          "coef": 1.0
+          "delta_min_s": 5.0,
+          "coef": 1.0,
+          "hard_min_s": 3.0
         }
       },
       {
@@ -767,8 +768,9 @@
       }
     ],
     "margin_default": {
-      "delta_min_s": 2.0,
-      "coef": 1.0
+      "delta_min_s": 5.0,
+      "coef": 1.0,
+      "hard_min_s": 3.0
     },
     "pareto": {
       "num_points": 8,

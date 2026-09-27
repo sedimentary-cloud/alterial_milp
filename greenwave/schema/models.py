@@ -576,8 +576,11 @@ class CorridorSpec:
 # 绿波带的 margin 配置：希望带宽离绿灯窗口边界至少留多少秒。
 @dataclass(frozen=True)
 class MarginSpec:
+    # 软 margin 目标：低于该值产生罚项。
     delta_min_s: float = 2.0
     coef: float = 1.0
+    # 硬 margin 下限：低于该值直接不可行；0 表示不启用硬约束。
+    hard_min_s: float = 0.0
 
     @classmethod
     def from_obj(cls, obj: Any) -> "MarginSpec":
@@ -586,7 +589,8 @@ class MarginSpec:
         if obj is None:
             return cls()
         return cls(_num(obj.get("delta_min_s", 2.0), "delta_min_s"),
-                   _num(obj.get("coef", 1.0), "coef"))
+                   _num(obj.get("coef", 1.0), "coef"),
+                   _num(obj.get("hard_min_s", 0.0), "hard_min_s"))
 
 
 # 一条优化需求：绿波带或红波带。
@@ -898,11 +902,17 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
             "band_demands": [{
                 "id": b.id, "type": b.type, "direction": b.direction, "nodes": list(b.nodes),
                 "max_bands": b.max_bands, "weight": b.weight,
-                "margin": None if b.margin is None else {"delta_min_s": b.margin.delta_min_s,
-                                                          "coef": b.margin.coef},
+                "margin": None if b.margin is None else {
+                    "delta_min_s": b.margin.delta_min_s,
+                    "coef": b.margin.coef,
+                    "hard_min_s": b.margin.hard_min_s,
+                },
             } for b in self.objective.band_demands],
-            "margin_default": {"delta_min_s": self.objective.margin_default.delta_min_s,
-                               "coef": self.objective.margin_default.coef},
+            "margin_default": {
+                "delta_min_s": self.objective.margin_default.delta_min_s,
+                "coef": self.objective.margin_default.coef,
+                "hard_min_s": self.objective.margin_default.hard_min_s,
+            },
             "pareto": {"num_points": self.objective.pareto.num_points,
                        "relax_max": self.objective.pareto.relax_max,
                        "topk_grids": self.objective.pareto.topk_grids},

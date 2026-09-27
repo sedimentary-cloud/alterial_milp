@@ -967,6 +967,38 @@ class ModelBuilder:
                 # 带离绿灯窗口左右边界太近时，把不足的部分记成 σ，
                 # 再乘以系数罚到 composite 目标里。
                 margin = self.problem.margin_for(b)
+
+                # C8_HARD：margin 硬下限。hard_min_s=0 表示不启用。
+                if margin.hard_min_s > 0:
+                    M_hard = self.m.containment
+                    for side in ("s", "e"):
+                        for j, node in enumerate(b.nodes):
+                            for k in range(1, self.ctx.max_window_slots(node, d) + 1):
+                                s_var = self.meta.effective[(node, d)].s[k]
+                                e_var = self.meta.effective[(node, d)].e[k]
+                                phi = self.meta.phi[node]
+                                nv = n[(q, j)]
+                                av = a[(q, j, k)]
+                                if side == "s":
+                                    row = LinearExpr.of(u[q], 1.0).add(phi, -1.0).add(s_var, -1.0)
+                                    row.add(nv, -self.C).add(av, -M_hard)
+                                    self.cons.add(row, ">=",
+                                                  margin.hard_min_s - table.cum_T_s[j] - M_hard,
+                                                  ConstraintMeta("C8_HARD",
+                                                                 f"margin hard start {b.id}/{q}/{node}/{k}",
+                                                                 {"demand": b.id, "slot": str(q), "node": node,
+                                                                  "window": str(k)}))
+                                else:
+                                    row = LinearExpr.of(phi, 1.0).add(e_var, 1.0)
+                                    row.add(nv, self.C).add(u[q], -1.0).add(beta[q], -1.0)
+                                    row.add(av, -M_hard)
+                                    self.cons.add(row, ">=",
+                                                  margin.hard_min_s + table.cum_T_s[j] - M_hard,
+                                                  ConstraintMeta("C8_HARD",
+                                                                 f"margin hard end {b.id}/{q}/{node}/{k}",
+                                                                 {"demand": b.id, "slot": str(q), "node": node,
+                                                                  "window": str(k)}))
+
                 if margin.delta_min_s > 0 and margin.coef > 0:
                     ref = MarginSlackRef(b.id, margin.coef)
                     for side in ("s", "e"):

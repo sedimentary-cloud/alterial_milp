@@ -229,6 +229,13 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
             margin = problem.margin_for(b)
             if margin.delta_min_s < 0:
                 issues.append(ValidationIssue("error", "V10", f"demand {b.id!r} delta_min_s must be >=0", (b.id,)))
+            if margin.hard_min_s < 0:
+                issues.append(ValidationIssue("error", "V10", f"demand {b.id!r} hard_min_s must be >=0", (b.id,)))
+            if margin.hard_min_s > margin.delta_min_s:
+                issues.append(ValidationIssue("warning", "V10",
+                                              f"demand {b.id!r} hard_min_s > delta_min_s; "
+                                              f"soft margin target is weaker than hard limit",
+                                              (b.id,)))
             else:
                 widths = []
                 for node in b.nodes:
