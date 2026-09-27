@@ -192,8 +192,6 @@ def _standard_demand(did: str, kind: str, direction: str, nodes, weight: float =
         "max_bands": 1,
         "weight": weight,
     }
-    if kind == "green":
-        obj["margin"] = {"delta_min_s": 0.0, "coef": 0.0}
     return obj
 
 
@@ -276,8 +274,14 @@ def _run_standard_objective_scenarios() -> None:
         problem["objective"]["pareto"] = {"num_points": 0, "relax_max": 0.0, "topk_grids": 0}
         # 这些是 objective 对照场景，默认去掉只针对原上行带宽的 global constraints。
         problem["global_constraints"] = []
-        # Case 2 额外要求：全局上行绿波带宽 >= 15s。
+        # Case 2 使用 objective 级 margin：硬 3s，软 5s。
+        # 同时额外要求：全局上行绿波带宽 >= 15s。
         if name == "standard_case_02_single_green_single_red_sum":
+            problem["objective"]["margin_default"] = {
+                "delta_min_s": 5.0,
+                "coef": 1.0,
+                "hard_min_s": 3.0,
+            }
             problem["global_constraints"] = [{
                 "id": "up_green_bandwidth_min_15",
                 "terms": [{
