@@ -175,7 +175,7 @@
             }
           ],
           "sense": "==",
-          "rhs": 0.0,
+          "rhs_s": 0.0,
           "hard": true
         }
       ],
@@ -330,7 +330,7 @@
             }
           ],
           "sense": "==",
-          "rhs": 0.0,
+          "rhs_s": 0.0,
           "hard": true
         }
       ],
@@ -485,7 +485,7 @@
             }
           ],
           "sense": "==",
-          "rhs": 0.0,
+          "rhs_s": 0.0,
           "hard": true
         }
       ],
@@ -782,7 +782,7 @@
     "red_boundary_default": {
       "start": {
         "free_s": 3.0,
-        "coef": 5.0
+        "coef": 0.2
       },
       "end": null
     }
@@ -818,7 +818,7 @@
         }
       ],
       "sense": ">=",
-      "rhs": 15.0,
+      "rhs_s": 15.0,
       "hard": true
     },
     {
@@ -833,7 +833,7 @@
         }
       ],
       "sense": ">=",
-      "rhs": 20.0,
+      "rhs_s": 20.0,
       "hard": false,
       "soft": {
         "coef": 1.0,
@@ -860,8 +860,7 @@
         }
       ],
       "sense": ">=",
-      "rhs": 15.0,
-      "rhs_unit": "s",
+      "rhs_s": 15.0,
       "hard": true
     },
     {
@@ -882,8 +881,7 @@
         }
       ],
       "sense": ">=",
-      "rhs": 15.0,
-      "rhs_unit": "s",
+      "rhs_s": 15.0,
       "hard": true
     },
     {
@@ -904,8 +902,7 @@
         }
       ],
       "sense": ">=",
-      "rhs": 25.0,
-      "rhs_unit": "s",
+      "rhs_s": 25.0,
       "hard": false,
       "soft": {
         "coef": 2.0,
@@ -930,8 +927,7 @@
         }
       ],
       "sense": ">=",
-      "rhs": 25.0,
-      "rhs_unit": "s",
+      "rhs_s": 25.0,
       "hard": false,
       "soft": {
         "coef": 1.0,
@@ -956,8 +952,7 @@
         }
       ],
       "sense": "<=",
-      "rhs": 70.0,
-      "rhs_unit": "s",
+      "rhs_s": 70.0,
       "hard": false,
       "soft": {
         "coef": 0.2,
@@ -982,8 +977,7 @@
         }
       ],
       "sense": "<=",
-      "rhs": 70.0,
-      "rhs_unit": "s",
+      "rhs_s": 70.0,
       "hard": false,
       "soft": {
         "coef": 0.3,

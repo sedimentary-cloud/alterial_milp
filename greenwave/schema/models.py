@@ -221,6 +221,9 @@ def _parse_rhs_fields(obj: Mapping[str, Any]) -> tuple[float | None, float | Non
     """
     rhs = obj.get("rhs")
     unit = obj.get("rhs_unit")
+    if rhs is None and unit is not None:
+        raise ValueError(
+            "rhs_unit requires rhs; use rhs_s/rhs_ratio or provide rhs with rhs_unit")
     if rhs is not None:
         if obj.get("rhs_s") is not None or obj.get("rhs_ratio") is not None:
             raise ValueError("rhs and rhs_s/rhs_ratio cannot be provided together")

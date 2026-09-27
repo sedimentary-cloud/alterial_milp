@@ -347,6 +347,18 @@ class TestDocumentCases(unittest.TestCase):
         self.assertAlmostEqual(out["grid_results"][0]["composite_best"], 36.0, places=3)
 
 
+    def test_rhs_unit_requires_rhs(self):
+        from greenwave.schema.models import ConstraintSpec
+        with self.assertRaises(ValueError):
+            ConstraintSpec.from_obj({
+                "id": "bad_rhs_unit",
+                "terms": [],
+                "sense": ">=",
+                "rhs_s": 10.0,
+                "rhs_unit": "ratio",
+                "hard": True,
+            })
+
     def test_time_space_diagram_render(self):
         import os
         import tempfile
