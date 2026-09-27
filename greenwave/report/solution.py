@@ -155,6 +155,10 @@ class SolutionDecoder:
                     bands.append(ConstructedBand(b.id, q, True, width, start, windows,
                                                  red_instance=red_instance))
 
+        # 存在性 e=1 但宽度为 0 的带是 MILP 的退化最优解；
+        # 报告/绘图层面直接忽略，避免出现一条零宽度的假带。
+        bands = [b for b in bands if b.width_s > 1e-7]
+
         # 第三步：重新计算真实的违反量和目标值。
         # 注意：不能直接使用求解器内部的松弛变量值，
         # 因为它可能大于真实违反量。

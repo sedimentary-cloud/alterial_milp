@@ -10,7 +10,8 @@
 ε-constraint 的做法是：
 - 先把总带宽固定在一个接近最优的值 B*；
 - 然后允许它稍微下降 ε；
-- 在这个前提下，去最小化路口损失；
+- 在这个前提下，先最小化路口损失 L；
+- 再在 L 最优的解里最大化 composite（字典序 tie-break）；
 - ε 从小到大取几个点，就得到一条“权衡曲线”，即 Pareto 前沿。
 """
 from __future__ import annotations
@@ -63,21 +64,40 @@ class EpsilonConstraintScanner:
         # B* 作下界，会被数值误差误判为不可行，从而丢掉 Pareto 原点。
         # 这里加一个远小于报告精度的数值容差，避免该问题。
         num_slack = 1e-7 * max(1.0, relax_mag)
+        solve_options = SolveOptions(
+            time_limit_s=self.problem.solver.time_limit_s,
+            mip_rel_gap=self.problem.solver.mip_rel_gap,
+        )
+        loss_tol = 1e-6 * max(1.0, abs(Bstar))
+
         for l in range(self.cfg.num_points + 1):
             eps = (l / max(1, self.cfg.num_points)) * self.cfg.relax_max * relax_mag
             session = self.backend.create(model)
+            # 字典序第一阶段：在 composite 允许下降 eps 的前提下，最小化 loss。
             self.backend.set_objective(session, model.expr_loss(), "min")
             self.backend.add_constraint(
                 session, model.expr_composite(), ">=", Bstar - eps - num_slack,
                 ConstraintMeta("EPS", f"composite >= B*-epsilon l={l}", {"epsilon": str(eps)}),
             )
-            res = self.backend.solve(session, SolveOptions(
-                time_limit_s=self.problem.solver.time_limit_s,
-                mip_rel_gap=self.problem.solver.mip_rel_gap,
-            ))
-            if res.values is None or res.status in (SolveStatus.INFEASIBLE, SolveStatus.ERROR):
+            res1 = self.backend.solve(session, solve_options)
+            if res1.values is None or res1.status in (SolveStatus.INFEASIBLE, SolveStatus.ERROR):
                 continue
-            sol = decoder.decode(res.values)
+            sol1 = decoder.decode(res1.values)
+
+            # 字典序第二阶段：固定 loss 最优值，最大化 composite。
+            # 这样同一个 loss 水平下不会返回一个被支配的较低 composite 点。
+            self.backend.set_objective(session, model.expr_composite(), "max")
+            self.backend.add_constraint(
+                session, model.expr_loss(), "<=", float(sol1.loss_s) + loss_tol,
+                ConstraintMeta("LEX", f"loss <= L*+tol l={l}", {"epsilon": str(eps)}),
+            )
+            res2 = self.backend.solve(session, solve_options)
+            if (res2.values is not None
+                    and res2.status not in (SolveStatus.INFEASIBLE, SolveStatus.ERROR)):
+                sol = decoder.decode(res2.values)
+            else:
+                # 第二阶段失败时回退到第一阶段可行点，至少保留一个已求出的点。
+                sol = sol1
             points.append(ParetoPoint(float(eps), float(sol.composite_s),
                                       float(sol.loss_s), sol))
         return ParetoFront(points, base_grid=base)
