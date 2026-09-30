@@ -1,5 +1,12 @@
 # 干线绿波 / 红波协调优化 MILP 算法包 — 设计文档
 
+> **v2 变更（已实现）：相位边界建模。**
+> 输入 plan 使用 `directions[d].boundaries + green_mask`，不再使用 `windows`。
+> 绿灯窗口和红窗是派生量；`boundary` 原子取代 `endpoint`；
+> 一个方向必须同时有绿区间和红区间，首尾区间不能同时为绿；
+> 双周期边界在 `(0, 0.5)` 声明并复制。
+> 下文 3.3 旧窗口描述保留作历史参考；实现以 v2 为准。
+
 | 项目 | 内容 |
 |---|---|
 | 文档版本 | v1.0 |
@@ -25,13 +32,16 @@
 
 ### 1.2 核心抽象
 
-**干线看不到路口内部的具体相位方案，只能感受到路口在干线上下行方向上的绿灯窗口。** 因此每个信控方案被抽象为：
+**干线看不到路口内部的具体相位方案，只能感受到路口在干线上下行方向上的绿灯窗口。** v2 中，每个信控方案被抽象为：
 
-- 每个方向若干个绿灯窗口（一个周期内 ≤ 3 个，双周期方案复制后 ≤ 6 个），以周期比例表示起止；
-- 窗口端点的可调范围与端点之间的线性约束（硬 / 软）；
+- 每个方向一串有序**相位边界**（周期比例），边界把周期切成若干区间；
+- `green_mask` 声明哪些区间对干线该方向为绿灯；
+- 绿灯窗口是**派生量**（极大连续绿区间的并）；红窗是整周期补集派生量；
+- 每条边界可声明可调范围 `[lo, hi]`，并可被任意线性约束引用；
 - 方案被选中时才生效的全部约束。
 
-干线优化在这个抽象层上进行：带（band）= 时间-空间图上连续穿过一系列路口绿灯窗口的时间区间。
+干线优化在派生窗口层上进行：带（band）= 时间-空间图上连续穿过一系列路口绿灯窗口的时间区间。
+单个相位可以隐藏在绿灯窗口内部——边界仍被显式建模、可被约束引用，这是 v2 的核心动机。
 
 ### 1.3 关键概念定义
 
@@ -42,8 +52,9 @@
 | 红波带 | 上游路口**一个**绿灯窗口（平移行程时间 τ 后）与下游邻接路口**一个**红灯区间的重叠时间区间。**只能在相邻两个路口之间定义，结构上不可能穿过 3 个及以上路口连续传播**（越过下游路口后定义它的红灯区间已不存在） |
 | 带需求（BandDemand） | 用户声明的一条优化目标单元：{方向, 有序节点列表, 类型(绿/红), 每周期最大带数, 权重, margin 参数}。红带需求强制节点数 = 2 |
 | 窗口绿波 | 起讫路口为干线中间某两路口的链式绿带（部分干线绿波），与全程绿波同为链式带需求的特例 |
+| 相位边界 / green_mask | 方案把每个方向的周期用有序边界切成区间，`green_mask` 标记哪些区间对干线为绿灯；绿窗和红窗均为派生量（3.3） |
 | composite band objective | 干线目标 = 所有带需求的带宽加权和 − margin 短缺罚 − owner 为 composite 的软约束罚（单位：秒） |
-| 路口损失（intersection loss） | 路口窗口端点线性组合的软约束违反量 × 强度系数之和（单位：秒），仅选中方案激活 |
+| 路口损失（intersection loss） | 路口相位边界线性组合的软约束违反量 × 强度系数之和（单位：秒），仅选中方案激活 |
 | margin（端点净距） | 绿带端点到其所用绿灯窗口对应端点的距离；不足期望净距 δ_min 的部分计为短缺并罚款（红带无 margin） |
 
 ### 1.4 多目标结构
@@ -142,7 +153,7 @@
 }
 ```
 
-### 3.3 Plan（信控方案）
+### 3.3 Plan（信控方案，v2 相位边界）
 
 #### 3.3.1 基本结构
 
@@ -151,51 +162,58 @@
   "id": "I1_P1",
   "intersection": "I1",
   "double_cycle": false,
-  "windows": {
-    "up":   [[0.0, 0.2], [0.5, 0.9]],
-    "down": [[0.3, 0.6]]
+  "min_phase_s": 0.001,
+  "directions": {
+    "up": {
+      "boundaries": [
+        {"pos_r": 0.2, "adjust": [-0.02, 0.02]},
+        {"pos_r": 0.6}
+      ],
+      "green_mask": [true, false, true, false]
+    },
+    "down": {
+      "boundaries": [{"pos_r": 0.5}],
+      "green_mask": [true, false]
+    }
   },
-  "adjustable": {
-    "up":   {"0": {"start": [-0.02, 0.02], "end": [-0.05, 0.05]}},
-    "down": {}
-  },
-  "hard_constraints": [ /* 见 3.6 */ ],
-  "soft_constraints": [ /* 见 3.6 */ ]
+  "hard_constraints": [],
+  "soft_constraints": []
 }
 ```
 
-- 窗口以**周期比例** `[start, end)` 给出，0 ≤ start < end；双周期复制产生的窗口允许 end ≤ 2（展开表示，**禁止 mod 回 [0,1)**，见 3.3.5）；
-- 同一方向窗口有序且不重叠（校验规则 V3）；
-- `adjustable`：声明窗口端点的微调范围（单位：比例，相对名义值的偏移 [lo, hi]，lo ≤ 0 ≤ hi）。未声明的端点固定。
+- 单周期边界在 `(0, 1)`；双周期在 `(0, 0.5)`；声明边界数 ≤ 6。
+- `green_mask` 长度 = 边界数 + 1，方案内固定。
+- 一个方向必须同时有绿区间和红区间；首尾区间不能同时为绿。
+- 绿窗 = 极大连续绿区间；红窗 = 整周期补集中的极大连续非绿区间。
+- 红窗允许跨 0/C 以及双周期的 0.5；跨 0/C 用 `wrap=1` 表示，不拆 ID。
 
-#### 3.3.2 窗口端点的变量引用
+#### 3.3.2 边界变量引用
 
-约束表达式中引用端点的**秒值**：
-
+```text
+boundary(intersection, plan, direction, index)
+  秒值 = (pos_r + δ) · C
 ```
-endpoint(intersection, plan, direction, window_index, side)
-  side ∈ {"start", "end"}
-  秒值 = (s̄ + δ) · C      （C 为当前格点周期，δ 为微调量，固定端点 δ ≡ 0）
-```
+
+`index` 是声明边界下标（0-based）。派生窗口端点 = 对应边界值；`rid=K` 的红窗终点额外 `+C`。
 
 #### 3.3.3 方案内约束
 
-- `hard_constraints`：端点秒值的线性组合与常数比较，方案选中时必须满足；
-- `soft_constraints`：同形，但可违反；违反量（秒）× `coef` 计入**路口损失**（owner 固定为 intersection_loss）；
-- 典型用例：最优绿信比偏离（`end − start ∈ [0.38C, 0.42C]` → 秒值区间软约束）、最小绿（硬）、两窗口间距固定（硬等式）。
+- `boundary`：边界秒值的线性组合；
+- `window_duration`：派生绿窗时长；
+- `red_duration`：plan-native 红窗时长，`window` 是 `rid`（1..K）；
+- 边界排序 + `min_phase_s` 由建模器内置生成，无需用户声明；
+- 软约束违反量 × `coef` 计入路口损失或 composite。
 
-#### 3.3.4 方案在格点下的可行性
+#### 3.3.4 方案可行性
 
-方案在周期 C 下可行 ⟺ 其窗口秒值 + 可调范围 + 硬约束构成的多面体非空。可行性由预处理层逐 `(i, p, C)` 精确判定（见 §5）。**固定窗口方案在周期 C 下违反硬约束时：仅剔除 + 诊断记录，不自动修复**（已锁定的语义）。
+方案在周期 C 下可行 ⟺ 边界 δ + 排序 + `min_phase_s` + 硬约束构成的多面体非空。预处理逐 `(i,p,C)` 精确判定；不可行方案只剔除并诊断。
 
-#### 3.3.5 双周期方案（`double_cycle: true`）
+#### 3.3.5 双周期方案
 
-双周期路口建模为公共周期 C 内的复制方案：
-
-1. 原窗口 `(s, e)` 复制为 `(s, e)` 与 `(s+0.5, e+0.5)`；复制后 end > 1 的窗口保持展开表示（如 `(1.0, 1.4)`）；
-2. 若端点可调，两份对应端点的微调量用**一致性等式**锁定：`δ_copy2 = δ_copy1`（即 copy2 端点 = copy1 端点 + 0.5，比例域）。**该等式必须显式生成**——缺失时求解器会让两个半周期不对称，等价于偷偷变成全周期方案；
-3. 复制后窗口数上限 6，带槽数上界自适应（见 4.8）；
-4. 复制窗口同样参与 3.3.4 的可行性检查（含一致性等式）。
+1. 边界在半周期 `(0, 0.5)` 声明；
+2. 展开为 `{b_j} ∪ {0.5} ∪ {b_j + 0.5}`，每个半周期独立派生绿窗；
+3. 复制边界复用同一个 δ，一致性是结构性的；
+4. 红窗按展开后的整周期补集派生，允许跨 0.5。
 
 ### 3.4 BandDemand（带需求）
 
@@ -263,15 +281,15 @@ endpoint(intersection, plan, direction, window_index, side)
 | kind | 引用 | 单位 |
 |---|---|---|
 | `offset` | 路口偏置 φ_i | 秒 |
-| `endpoint` | 方案窗口端点秒值（3.3.2） | 秒 |
+| `boundary` | 方案相位边界秒值（3.3.2） | 秒 |
 | `bandwidth` | 某带需求的**聚合带宽**（同需求多带宽度直接加和 Β_b = Σ_q β_{b,q}） | 秒 |
 | `const` | 常数 | — |
 
 规则：
 
 - `hard: true` → 硬约束；`hard: false` → 必须给 `soft.coef` 与 `soft.owner ∈ {"composite", "intersection_loss"}`；
-- 方案内约束可引用 `endpoint` 原子，仅在方案选中时生效（big-M 激活）；
-- 全局约束（跨路口、带宽类）不得引用 `endpoint` 原子（避免方案归属歧义）；
+- 方案内约束可引用 `boundary` / `window_duration` / `red_duration` 原子，仅在方案选中时生效（big-M 激活）；
+- 全局约束（跨路口、带宽类）不得引用 `boundary` / `window_duration` / `red_duration` 原子（避免方案归属歧义）；
 - 违反量定义：`expr ≤ rhs` 的违反 = max(0, expr − rhs)；`expr ≥ rhs` 对称；`=` 拆成两个方向各计违反。
 
 ### 3.7 GridConfig（格点配置）
@@ -305,7 +323,7 @@ endpoint(intersection, plan, direction, window_index, side)
 | V4 | 红带需求 nodes 长度 = 2；绿带 ≥ 2；节点在干线上且按行驶方向排序 |
 | V5 | 带需求节点列表沿行驶方向连续（中间不跳路口） |
 | V6 | 软约束必须声明 coef 与 owner；硬约束不得声明 soft |
-| V7 | 全局约束不得引用 endpoint 原子 |
+| V7 | 全局约束不得引用 boundary / window_duration / red_duration 原子 |
 | V8 | 周期、速度、距离为正；倍率 > 0 |
 | V9 | 每个路口至少 1 个方案（格点级可行性由 §5 判定） |
 | V10 | margin.delta_min_s ≥ 0 且小于链上最小窗口宽度（给出警告而非报错） |
@@ -336,28 +354,38 @@ endpoint(intersection, plan, direction, window_index, side)
 | `σ^{m,s}_{b,q,j}, σ^{m,e}_{b,q,j}` | 连续 ≥ 0 | 绿带在节点 n_j 的左/右端 margin 短缺 |
 | `σ_c` | 连续 ≥ 0 | 软约束 c 的违反量 |
 
-### 4.2 有效窗口重构（关键工程决策，必须按此实现）
+### 4.2 派生窗口重构（v2 关键工程决策）
 
-带-窗口指派**不按** `(带, 路口, 方案, 窗口)` 建立，而按 `(带, 路口, 方向, 槽位)` 建立。对每个 `(i, d)`，槽位 `k = 1..K_i^max`，`K_i^max = max_p K_{i,p,d}`（≤ 3，双周期 ≤ 6）。
+带-窗口指派仍按 `(带, 路口, 方向, 槽位)` 建立；窗口槽位数
+`K_i^max = max_p K_{i,p,d}`。v2 的变化是：窗口端点不再是独立变量，而是由
+方案边界 δ 直接拼出的 `LinearExpr`。
 
-定义常数 `A_{i,p,d,k} = 1` 当且仅当方案 p 在方向 d 至少有 k 个窗口。
+预处理为每个 `(方案, 方向, 派生窗口)` 固化：
 
-```
-槽位可用性：  h_{i,d,k} = Σ_p A_{i,p,d,k} · x_{i,p}          （Σx=1 ⟹ h ∈ {0,1} 自动成立）
-有效端点：    ŝ_{i,d,k} = Σ_p [ s̄_{i,p,d,k}·C·x_{i,p} + C·z^s_{i,p,d,k} ]
-             ê_{i,d,k} = Σ_p [ ē_{i,p,d,k}·C·x_{i,p} + C·z^e_{i,p,d,k} ]
-```
-
-其中固定端点无 z 项。双线性项 `z = x·δ` 用标准 McCormick（二进制 × 有界连续）线性化：
-
-```
-z ≤ δ^hi·x        z ≥ δ^lo·x
-z ≤ δ − δ^lo·(1−x)   z ≥ δ − δ^hi·(1−x)
+```text
+窗口槽位 k 的起点 → 扩展 edge a，终点 → 扩展 edge b，wrap ∈ {0,1}
+value(edge) = 0 / 1（周期边） 或 (pos_r + offset + δ)（声明边界）
 ```
 
-效果：指派二进制数量从 `带数 × N × 方案数 × 3` 降到 `带数 × N × 3`；窗口端点的方案依赖全部吸收进连续变量 ŝ/ê。
+建模时：
 
-双周期复制：复制窗口直接作为额外资位（k = 4..6），其端点名义值 = 原窗口 + 0.5（比例），微调量一致性等式 `δ_copy = δ_orig` 按 3.3.5 生成后，复制槽位的 z 变量直接复用原槽位的 δ（无需新建微调变量）。
+```text
+ŝ_{i,d,k} = Σ_p x_p * value_p(start_edge, δ_p)
+ê_{i,d,k} = Σ_p x_p * (value_p(end_edge, δ_p) + wrap_p)
+h_{i,d,k} = Σ_p A_{i,p,d,k} * x_p
+```
+
+其中 `A=1` 表示方案 p 至少有 k 个派生窗口。双线性项 `z = x·δ` 用 McCormick：
+
+```text
+z ≤ hi·x        z ≥ lo·x
+z ≤ δ − lo·(1−x)   z ≥ δ − hi·(1−x)
+```
+
+- 单方案路口直接把 `x=1` 代入，不建 z；
+- 双周期复制边界复用同一个 δ，因此一致性是结构性的；
+- 红窗仍由有效绿窗补集生成，保持 gap + wrap 结构；
+- C4–C13 的公式形式不变，只是所有窗口端点都是边界 δ 的线性表达式。
 
 ### 4.3 约束全集
 
@@ -502,7 +530,7 @@ u_{b,q} + β_{b,q} ≤ u_{b,q2} + M·(2 − e_{b,q} − e_{b,q2})    ∀ q < q2
 软： expr ≤ rhs + σ_c   （sense ≥ 对称；= 拆双向）
 ```
 
-**C11 双周期一致性**（见 3.3.5）：复制端点微调量等式。
+**C11 双周期一致性**：v2 中复制边界复用同一个 δ，一致性是结构性的，不需要额外等式。
 
 ### 4.4 目标函数
 
@@ -683,7 +711,7 @@ Step 4  块坐标 refinement（默认 3 轮）：
 
 ### 7.4 不可行诊断工具
 
-scipy 无法获取 IIS。提供「分块软化」调试器：按约束组（C1–C11、用户约束逐组）依次替换为带大罚系数的软约束重解，定位使模型恢复可行的最小约束组集合，输出诊断报告。触发方式：MILP 返回 infeasible 时自动运行（可在 SolverConfig 关闭）。
+scipy 无法获取 IIS。提供「分块软化」调试器：按约束组（C1–C13、用户约束逐组）依次替换为带大罚系数的软约束重解，定位使模型恢复可行的最小约束组集合，输出诊断报告。触发方式：MILP 返回 infeasible 时自动运行（可在 SolverConfig 关闭）。
 
 ---
 
@@ -745,8 +773,8 @@ greenwave/
 │   └── greedy.py        # §6 贪心初始解与格点打分
 ├── model/
 │   ├── variables.py     # 变量注册表（统一命名、索引、边界、integrality）
-│   ├── windows.py       # 有效窗口重构（4.2）、红窗补集生成、双周期复制
-│   ├── constraints.py   # C1–C11 约束工厂
+│   ├── windows.py       # 派生窗口表达式、红窗补集生成、双周期边界复用
+│   ├── constraints.py   # C1–C13 约束工厂
 │   ├── objective.py     # composite / L 目标装配、owner 簿记
 │   └── builder.py       # 单格点模型构建入口（含 4.8 自适应裁剪）
 ├── solve/
@@ -768,7 +796,7 @@ tests/
 关键设计约束：
 
 1. **建模层与求解器解耦**：`model/` 只产出变量表 + 稀疏线性约束矩阵 + 目标向量 + integrality + bounds，不 import scipy；`solve/` 负责翻译与调用；
-2. **约束可追溯**：每条约束携带 `(组号 C1–C11, 语义标签, 相关对象 id)` 元数据，供诊断工具与调试输出使用；
+2. **约束可追溯**：每条约束携带 `(组号 C1–C13, 语义标签, 相关对象 id)` 元数据，供诊断工具与调试输出使用；
 3. **表达式系统单一入口**：方案内约束、用户全局约束、margin、目标罚项全部经由同一个 LinearExpression 构件生成，禁止散落的临时拼装；
 4. **配置驱动**：带需求、目标簿记、pareto 参数、求解参数全部来自输入 JSON，无硬编码业务参数。
 
@@ -807,12 +835,12 @@ class WindowAdjustSpec(BaseModel, frozen=True):
     end: EndpointRange | None = None
 
 class AtomRef(BaseModel, frozen=True):
-    kind: Literal["offset", "endpoint", "bandwidth", "const"]
-    intersection: str | None = None     # offset / endpoint 必填
-    plan: str | None = None             # endpoint 必填
-    direction: Direction | None = None  # endpoint 必填
-    window: int | None = None           # endpoint 必填
-    side: Side | None = None            # endpoint 必填
+    kind: Literal["offset", "boundary", "window_duration", "red_duration", "bandwidth", "const"]
+    intersection: str | None = None     # offset / boundary 必填
+    plan: str | None = None             # boundary 必填
+    direction: Direction | None = None
+    index: int | None = None            # boundary 必填（0-based）
+    window: int | None = None           # window_duration / red_duration
     demand: str | None = None           # bandwidth 必填
     const: float | None = None          # const 必填
     # 校验器：kind 与必填字段组合必须合法，多余字段必须为 None
@@ -839,16 +867,18 @@ class PlanSpec(BaseModel, frozen=True):
     id: str
     intersection: str
     double_cycle: bool = False
-    windows: dict[Direction, tuple[WindowSpec, ...]]
-    adjustable: dict[Direction, dict[int, WindowAdjustSpec]] = {}
+    directions: dict[Direction, DirectionPlan]
+    # v2
+    directions: dict[Direction, DirectionPlan]
+    min_phase_s: float = 1e-3
     hard_constraints: tuple[ConstraintSpec, ...] = ()
     soft_constraints: tuple[ConstraintSpec, ...] = ()
 
-    def effective_windows(self, d: Direction) -> tuple[WindowSpec, ...]:
-        """双周期时返回复制展开后的窗口（3.3.5），否则原样返回。"""
+    def derived_windows(self, d: Direction) -> tuple[DerivedInterval, ...]:
+        """由 boundaries + green_mask 派生绿窗；双周期展开后返回全部窗口。"""
+    def derived_red_intervals(self, d: Direction) -> tuple[DerivedInterval, ...]:
+        """由整周期补集派生红窗，rid = 1..K；rid=K 可能 wrap。"""
     def window_count(self, d: Direction) -> int: ...
-    def nominal_endpoint_r(self, d: Direction, k: int, side: Side) -> float: ...
-    def adjust_range(self, d: Direction, k: int, side: Side) -> EndpointRange | None: ...
 
 class SegmentSpec(BaseModel, frozen=True):
     from_: str
@@ -1002,7 +1032,7 @@ class LinearExpr:
 
 @dataclass(frozen=True)
 class ConstraintMeta:
-    group: str    # "C1".."C11" | "PLAN_HARD" | "PLAN_SOFT" | "USER" | "EPS"
+    group: str    # "C1".."C13" | "PLAN_HARD" | "PLAN_SOFT" | "USER" | "EPS"
     label: str
     refs: dict[str, str]   # 相关对象 id（路口/方案/需求/槽位），供诊断与调试
 
@@ -1034,7 +1064,7 @@ class RedWindowSet:
     avail: dict[int, LinearExpr]   # hR
 
 class EffectiveWindowBuilder:
-    """4.2：建 ŝ/ê/h、δ/z 变量与 McCormick 约束；双周期复制槽位复用原 δ（C11 联动）。"""
+    """4.2：由边界表达式建 ŝ/ê 与 h，δ/z 变量与 McCormick 约束；双周期复制边界复用原 δ。"""
     def build(self, intersection: str, d: Direction) -> EffectiveWindowSet: ...
 
 class RedWindowBuilder:
@@ -1065,10 +1095,10 @@ class ModelBuilder:
     def __init__(self, problem: ProblemInput, ctx: GridPointContext) -> None: ...
     def build(self) -> ArterialModel:
         """按序执行（每步约束打组标签，§9 可追溯要求）：
-        _build_plan_selection(C1) → _build_effective_windows(4.2)
+        _build_plan_selection(C1) → _build_derived_windows(4.2)
         → _build_plan_constraints(C2/C3) → _build_green_bands(C4–C8)
         → _build_red_bands(C9) → _build_user_constraints(C10)
-        → _build_double_cycle_links(C11) → _assemble_objective(4.4)
+        → _build_plan_window_constraints(排序/min_phase) → _assemble_objective(4.4)
         """
 ```
 
@@ -1228,7 +1258,7 @@ class DiagnosisReport:
 class InfeasibilityDiagnoser:
     def __init__(self, model: ArterialModel, backend: SolverBackend) -> None: ...
     def diagnose(self) -> DiagnosisReport:
-        """按 ConstraintMeta.group 分组（C1–C11 / PLAN_HARD / USER），
+        """按 ConstraintMeta.group 分组（C1–C13 / PLAN_HARD / USER），
         逐组替换为大罚软约束重解（7.4）；GridRunner 在 status=INFEASIBLE 时自动调用。"""
 ```
 
@@ -1372,17 +1402,21 @@ def run(problem_json: dict) -> dict:
   "plans": [
     {
       "id": "I1_P1", "intersection": "I1", "double_cycle": false,
-      "windows": {"up": [[0.0, 0.45]], "down": [[0.5, 0.95]]},
-      "adjustable": {"up": {"0": {"end": [-0.05, 0.05]}}, "down": {}},
+      "min_phase_s": 0.001,
+      "directions": {
+        "up": {"boundaries": [{"pos_r": 0.45, "adjust": [-0.05, 0.05]}],
+               "green_mask": [true, false]},
+        "down": {"boundaries": [{"pos_r": 0.5}, {"pos_r": 0.95}],
+                 "green_mask": [false, true, false]}
+      },
       "hard_constraints": [
         {"id": "mg_up", "terms": [
-          {"atom": {"kind": "endpoint", "intersection": "I1", "plan": "I1_P1", "direction": "up", "window": 0, "side": "end"}, "coef": 1.0},
-          {"atom": {"kind": "endpoint", "intersection": "I1", "plan": "I1_P1", "direction": "up", "window": 0, "side": "start"}, "coef": -1.0}
+          {"atom": {"kind": "window_duration", "intersection": "I1", "plan": "I1_P1", "direction": "up", "window": 0}, "coef": 1.0}
         ], "sense": ">=", "rhs": 15.0, "hard": true}
       ],
       "soft_constraints": [
         {"id": "split_up", "terms": [
-          {"atom": {"kind": "endpoint", "intersection": "I1", "plan": "I1_P1", "direction": "up", "window": 0, "side": "end"}, "coef": 1.0}
+          {"atom": {"kind": "boundary", "intersection": "I1", "plan": "I1_P1", "direction": "up", "index": 0}, "coef": 1.0}
         ], "sense": "<=", "rhs_ratio": 0.42, "hard": false, "soft": {"coef": 2.0, "owner": "intersection_loss"}}
       ]
     }

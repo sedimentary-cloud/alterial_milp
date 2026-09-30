@@ -52,23 +52,30 @@
       "id": "I1_P1",
       "intersection": "I1",
       "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.5
+      "min_phase_s": 0.001,
+      "directions": {
+        "up": {
+          "boundaries": [
+            {
+              "pos_r": 0.5
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.5
+        },
+        "down": {
+          "boundaries": [
+            {
+              "pos_r": 0.5
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ]
-      },
-      "adjustable": {
-        "up": {},
-        "down": {}
+        }
       },
       "hard_constraints": [],
       "soft_constraints": []
@@ -77,36 +84,37 @@
       "id": "I2_P1",
       "intersection": "I2",
       "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.5
-          ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.5
-          ]
-        ]
-      },
-      "adjustable": {
+      "min_phase_s": 0.001,
+      "directions": {
         "up": {
-          "0": {
-            "end": [
-              0.0,
-              0.2
-            ]
-          }
+          "boundaries": [
+            {
+              "pos_r": 0.4,
+              "adjust": [
+                0.0,
+                0.2
+              ]
+            }
+          ],
+          "green_mask": [
+            true,
+            false
+          ]
         },
         "down": {
-          "0": {
-            "end": [
-              0.0,
-              0.2
-            ]
-          }
+          "boundaries": [
+            {
+              "pos_r": 0.4,
+              "adjust": [
+                0.0,
+                0.2
+              ]
+            }
+          ],
+          "green_mask": [
+            true,
+            false
+          ]
         }
       },
       "hard_constraints": [
@@ -115,12 +123,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I2",
                 "plan": "I2_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -134,12 +141,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I2",
                 "plan": "I2_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -153,23 +159,21 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I2",
                 "plan": "I2_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             },
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I2",
                 "plan": "I2_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": -1.0
             }
@@ -185,12 +189,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I2",
                 "plan": "I2_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -208,12 +211,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I2",
                 "plan": "I2_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -231,37 +233,38 @@
     {
       "id": "I3_P1",
       "intersection": "I3",
-      "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.5
-          ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.5
-          ]
-        ]
-      },
-      "adjustable": {
+      "double_cycle": true,
+      "min_phase_s": 0.001,
+      "directions": {
         "up": {
-          "0": {
-            "end": [
-              0.0,
-              0.2
-            ]
-          }
+          "boundaries": [
+            {
+              "pos_r": 0.3,
+              "adjust": [
+                0.0,
+                0.2
+              ]
+            }
+          ],
+          "green_mask": [
+            true,
+            false
+          ]
         },
         "down": {
-          "0": {
-            "end": [
-              0.0,
-              0.2
-            ]
-          }
+          "boundaries": [
+            {
+              "pos_r": 0.3,
+              "adjust": [
+                0.0,
+                0.2
+              ]
+            }
+          ],
+          "green_mask": [
+            true,
+            false
+          ]
         }
       },
       "hard_constraints": [
@@ -270,12 +273,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I3",
                 "plan": "I3_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -289,12 +291,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I3",
                 "plan": "I3_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -308,23 +309,21 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I3",
                 "plan": "I3_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             },
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I3",
                 "plan": "I3_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": -1.0
             }
@@ -332,6 +331,78 @@
           "sense": "==",
           "rhs_s": 0.0,
           "hard": true
+        },
+        {
+          "id": "I3_up_red1_min_015C",
+          "terms": [
+            {
+              "atom": {
+                "kind": "red_duration",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "up",
+                "window": 1
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": ">=",
+          "hard": true,
+          "rhs_ratio": 0.15
+        },
+        {
+          "id": "I3_up_red2_min_015C",
+          "terms": [
+            {
+              "atom": {
+                "kind": "red_duration",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "up",
+                "window": 2
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": ">=",
+          "hard": true,
+          "rhs_ratio": 0.15
+        },
+        {
+          "id": "I3_down_red1_min_015C",
+          "terms": [
+            {
+              "atom": {
+                "kind": "red_duration",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "down",
+                "window": 1
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": ">=",
+          "hard": true,
+          "rhs_ratio": 0.15
+        },
+        {
+          "id": "I3_down_red2_min_015C",
+          "terms": [
+            {
+              "atom": {
+                "kind": "red_duration",
+                "intersection": "I3",
+                "plan": "I3_P1",
+                "direction": "down",
+                "window": 2
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": ">=",
+          "hard": true,
+          "rhs_ratio": 0.15
         }
       ],
       "soft_constraints": [
@@ -340,12 +411,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I3",
                 "plan": "I3_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -363,12 +433,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I3",
                 "plan": "I3_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -387,36 +456,69 @@
       "id": "I4_P1",
       "intersection": "I4",
       "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.5
-          ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.5
-          ]
-        ]
-      },
-      "adjustable": {
+      "min_phase_s": 0.001,
+      "directions": {
         "up": {
-          "0": {
-            "end": [
-              0.0,
-              0.2
-            ]
-          }
+          "boundaries": [
+            {
+              "pos_r": 0.25,
+              "adjust": [
+                0.0,
+                0.1
+              ]
+            },
+            {
+              "pos_r": 0.5,
+              "adjust": [
+                0.0,
+                0.1
+              ]
+            },
+            {
+              "pos_r": 0.75,
+              "adjust": [
+                0.0,
+                0.1
+              ]
+            }
+          ],
+          "green_mask": [
+            true,
+            false,
+            false,
+            false
+          ]
         },
         "down": {
-          "0": {
-            "end": [
-              0.0,
-              0.2
-            ]
-          }
+          "boundaries": [
+            {
+              "pos_r": 0.25,
+              "adjust": [
+                0.0,
+                0.1
+              ]
+            },
+            {
+              "pos_r": 0.5,
+              "adjust": [
+                0.0,
+                0.1
+              ]
+            },
+            {
+              "pos_r": 0.75,
+              "adjust": [
+                0.0,
+                0.1
+              ]
+            }
+          ],
+          "green_mask": [
+            false,
+            true,
+            false,
+            false
+          ]
         }
       },
       "hard_constraints": [
@@ -425,12 +527,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I4",
                 "plan": "I4_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -444,12 +545,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I4",
                 "plan": "I4_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 1
               },
               "coef": 1.0
             }
@@ -459,27 +559,99 @@
           "hard": true
         },
         {
-          "id": "I4_sync_up_down_end",
+          "id": "I4_down_green_min_025C",
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "window_duration",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "down",
+                "window": 0
+              },
+              "coef": 1.0
+            }
+          ],
+          "sense": ">=",
+          "hard": true,
+          "rhs_ratio": 0.25
+        },
+        {
+          "id": "I4_sync_up_down_b0",
+          "terms": [
+            {
+              "atom": {
+                "kind": "boundary",
                 "intersection": "I4",
                 "plan": "I4_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             },
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I4",
                 "plan": "I4_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
+              },
+              "coef": -1.0
+            }
+          ],
+          "sense": "==",
+          "rhs_s": 0.0,
+          "hard": true
+        },
+        {
+          "id": "I4_sync_up_down_b1",
+          "terms": [
+            {
+              "atom": {
+                "kind": "boundary",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "up",
+                "index": 1
+              },
+              "coef": 1.0
+            },
+            {
+              "atom": {
+                "kind": "boundary",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "down",
+                "index": 1
+              },
+              "coef": -1.0
+            }
+          ],
+          "sense": "==",
+          "rhs_s": 0.0,
+          "hard": true
+        },
+        {
+          "id": "I4_sync_up_down_b2",
+          "terms": [
+            {
+              "atom": {
+                "kind": "boundary",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "up",
+                "index": 2
+              },
+              "coef": 1.0
+            },
+            {
+              "atom": {
+                "kind": "boundary",
+                "intersection": "I4",
+                "plan": "I4_P1",
+                "direction": "down",
+                "index": 2
               },
               "coef": -1.0
             }
@@ -495,12 +667,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I4",
                 "plan": "I4_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -514,22 +685,21 @@
           }
         },
         {
-          "id": "I4_down_end_soft_055",
+          "id": "I4_down_end_soft_060",
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I4",
                 "plan": "I4_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 1
               },
               "coef": 1.0
             }
           ],
           "sense": "<=",
-          "rhs_ratio": 0.55,
+          "rhs_ratio": 0.6,
           "hard": false,
           "soft": {
             "coef": 8.0,
@@ -542,36 +712,37 @@
       "id": "I5_P1",
       "intersection": "I5",
       "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.5
-          ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.5
-          ]
-        ]
-      },
-      "adjustable": {
+      "min_phase_s": 0.001,
+      "directions": {
         "up": {
-          "0": {
-            "end": [
-              0.0,
-              0.2
-            ]
-          }
+          "boundaries": [
+            {
+              "pos_r": 0.43,
+              "adjust": [
+                0.0,
+                0.2
+              ]
+            }
+          ],
+          "green_mask": [
+            true,
+            false
+          ]
         },
         "down": {
-          "0": {
-            "end": [
-              0.0,
-              0.2
-            ]
-          }
+          "boundaries": [
+            {
+              "pos_r": 0.43,
+              "adjust": [
+                0.0,
+                0.2
+              ]
+            }
+          ],
+          "green_mask": [
+            true,
+            false
+          ]
         }
       },
       "hard_constraints": [
@@ -580,12 +751,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I5",
                 "plan": "I5_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -599,12 +769,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I5",
                 "plan": "I5_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -620,12 +789,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I5",
                 "plan": "I5_P1",
                 "direction": "up",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -643,12 +811,11 @@
           "terms": [
             {
               "atom": {
-                "kind": "endpoint",
+                "kind": "boundary",
                 "intersection": "I5",
                 "plan": "I5_P1",
                 "direction": "down",
-                "window": 0,
-                "side": "end"
+                "index": 0
               },
               "coef": 1.0
             }
@@ -667,23 +834,30 @@
       "id": "I6_P1",
       "intersection": "I6",
       "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.5
+      "min_phase_s": 0.001,
+      "directions": {
+        "up": {
+          "boundaries": [
+            {
+              "pos_r": 0.5
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.5
+        },
+        "down": {
+          "boundaries": [
+            {
+              "pos_r": 0.5
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ]
-      },
-      "adjustable": {
-        "up": {},
-        "down": {}
+        }
       },
       "hard_constraints": [],
       "soft_constraints": []
@@ -730,7 +904,7 @@
           "I5",
           "I4"
         ],
-        "max_bands": 1,
+        "max_bands": 2,
         "weight": 1.0
       },
       {
@@ -741,7 +915,7 @@
           "I4",
           "I3"
         ],
-        "max_bands": 1,
+        "max_bands": 2,
         "weight": 1.0
       },
       {
@@ -752,7 +926,7 @@
           "I3",
           "I2"
         ],
-        "max_bands": 1,
+        "max_bands": 2,
         "weight": 1.0
       },
       {

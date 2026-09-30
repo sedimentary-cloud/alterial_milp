@@ -27,8 +27,8 @@ from ..schema.models import BandDemandSpec, Direction, PlanSpec, ProblemInput
 class PlanFeasibility:
     feasible: bool
     violations: tuple[str, ...] = ()
-    # witness adjustment values in ratio domain, keyed (direction, effective_window, side)
-    witness_r: tuple[tuple[Direction, int, str, float], ...] = ()
+    # witness adjustment values in ratio domain, keyed (direction, boundary_index)
+    witness_r: tuple[tuple[Direction, int, float], ...] = ()
 
 
 # 某条带需求的累计行程时间表。
@@ -67,7 +67,7 @@ class GridPointContext:
     feasible_plans: Mapping[str, tuple[PlanSpec, ...]]
     dropped: tuple[DroppedPlanRecord, ...]
     travel: Mapping[str, DemandTravelTable]
-    plan_witness_r: Mapping[str, tuple[tuple[Direction, int, str, float], ...]] = field(default_factory=dict)
+    plan_witness_r: Mapping[str, tuple[tuple[Direction, int, float], ...]] = field(default_factory=dict)
 
     def max_window_slots(self, intersection: str, d: Direction) -> int:
         plans = self.feasible_plans.get(intersection, ())
@@ -92,8 +92,8 @@ class GridPointContext:
     def max_cum_T_s(self) -> float:
         return max((t.span_s for t in self.travel.values()), default=0.0)
 
-    def witness_for(self, plan_id: str) -> dict[tuple[Direction, int, str], float]:
-        return {(d, k, side): v for d, k, side, v in self.plan_witness_r.get(plan_id, ())}
+    def witness_for(self, plan_id: str) -> dict[tuple[Direction, int], float]:
+        return {(d, j): v for d, j, v in self.plan_witness_r.get(plan_id, ())}
 
 
 __all__ = ["PlanFeasibility", "DemandTravelTable", "DroppedPlanRecord", "GridPointContext"]

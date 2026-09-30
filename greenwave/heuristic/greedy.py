@@ -42,7 +42,7 @@ class ConstructedBand:
 class GreedySolution:
     plan_selection: Mapping[str, str]
     offsets_s: Mapping[str, float]
-    adjustments_r: Mapping[tuple[str, Direction, int, Side], float]
+    adjustments_r: Mapping[tuple[str, Direction, int], float]
     bands: tuple[ConstructedBand, ...]
     composite_est: float
     loss_est: float = 0.0
@@ -56,6 +56,27 @@ class GreedyConstructor:
         self.ctx = ctx
         self.C = ctx.cycle_s
         self._witness = {plan_id: ctx.witness_for(plan_id) for plan_id in ctx.plan_witness_r}
+
+    # -- v2 boundary helpers --------------------------------------------------
+    def _edge_value_r(self, plan: PlanSpec, d: Direction, edge: int,
+                      witness: Mapping[tuple[Direction, int], float]) -> float:
+        kind, src, offset = plan.expanded_edge_sources(d)[edge]
+        if kind == "const":
+            return float(offset)
+        return plan.nominal_boundary_r(d, src) + offset + witness.get((d, src), 0.0)
+
+    def _window_endpoint_r(self, plan: PlanSpec, d: Direction, k: int, side: str,
+                           witness: Mapping[tuple[Direction, int], float]) -> float:
+        w = plan.window_edge_span(d, k)
+        if side == "start":
+            return self._edge_value_r(plan, d, w.start_edge, witness)
+        return self._edge_value_r(plan, d, w.end_edge, witness) + w.wrap
+
+    def _edge_duration_s(self, plan: PlanSpec, d: Direction, start_edge: int,
+                         end_edge: int, wrap: int,
+                         witness: Mapping[tuple[Direction, int], float]) -> float:
+        return (self._edge_value_r(plan, d, end_edge, witness) + wrap
+                - self._edge_value_r(plan, d, start_edge, witness)) * self.C
 
     # ------------------------------------------------------------------
     # public entry
@@ -105,11 +126,10 @@ class GreedyConstructor:
         """Return list of (start_s, end_s, k) for one nominal public cycle."""
         witness = self._witness.get(plan.id, {})
         out = []
-        for k, w in enumerate(plan.effective_windows(d)):
-            ds = witness.get((d, k, "start"), 0.0)
-            de = witness.get((d, k, "end"), 0.0)
-            out.append(((w.start_r + ds) * cycle_s + phi_s,
-                        (w.end_r + de) * cycle_s + phi_s, k))
+        for k in range(plan.window_count(d)):
+            s_r = self._window_endpoint_r(plan, d, k, "start", witness)
+            e_r = self._window_endpoint_r(plan, d, k, "end", witness)
+            out.append((s_r * cycle_s + phi_s, e_r * cycle_s + phi_s, k))
         return out
 
     def _demand_targets(self, u_ref: float) -> dict[str, dict[str, float]]:
@@ -156,11 +176,11 @@ class GreedyConstructor:
                 continue
             plan = selection[i]
             target = targets[b.id][i]
-            for k, w in enumerate(plan.effective_windows(b.direction)):
-                ds = self._witness.get(plan.id, {}).get((b.direction, k, "start"), 0.0)
-                de = self._witness.get(plan.id, {}).get((b.direction, k, "end"), 0.0)
-                for (nominal, delta) in ((w.start_r, ds), (w.end_r, de)):
-                    event = (nominal + delta) * self.C
+            witness = self._witness.get(plan.id, {})
+            for k in range(plan.window_count(b.direction)):
+                for nominal in (self._window_endpoint_r(plan, b.direction, k, "start", witness),
+                                self._window_endpoint_r(plan, b.direction, k, "end", witness)):
+                    event = nominal * self.C
                     # place the event close to target, with optional margin offsets
                     for target_shift in (0.0, 2.0, -2.0):
                         n = math.floor((target + target_shift - event) / self.C)
@@ -337,18 +357,27 @@ class GreedyConstructor:
     # evaluation / refinement
     # ------------------------------------------------------------------
     def _soft_violation_plan(self, plan: PlanSpec, c: ConstraintSpec,
-                             witness: Mapping[tuple[Direction, int, str], float]) -> float:
+                             witness: Mapping[tuple[Direction, int], float]) -> float:
         lhs = 0.0
         for t in c.terms:
             a = t.atom
-            if a.kind == "endpoint":
-                assert a.direction is not None and a.window is not None and a.side is not None
-                delta = witness.get((a.direction, a.window, a.side), 0.0)
-                val = (plan.nominal_endpoint_r(a.direction, a.window, a.side) + delta) * self.C
+            if a.kind == "boundary":
+                assert a.direction is not None and a.index is not None
+                delta = witness.get((a.direction, a.index), 0.0)
+                val = (plan.nominal_boundary_r(a.direction, a.index) + delta) * self.C
+            elif a.kind == "window_duration":
+                assert a.direction is not None and a.window is not None
+                w = plan.window_edge_span(a.direction, a.window)
+                val = self._edge_duration_s(plan, a.direction, w.start_edge, w.end_edge,
+                                            w.wrap, witness)
+            elif a.kind == "red_duration":
+                assert a.direction is not None and a.window is not None
+                reds = plan.derived_red_intervals(a.direction)
+                r = reds[a.window - 1]
+                val = self._edge_duration_s(plan, a.direction, r.start_edge, r.end_edge,
+                                            r.wrap, witness)
             elif a.kind == "const":
                 val = float(a.const or 0.0)
-            elif a.kind == "offset":
-                val = 0.0
             else:
                 val = 0.0
             lhs += t.coef * val
@@ -376,11 +405,9 @@ class GreedyConstructor:
             if slot is None:
                 continue
             plan = selection[node]
-            w = plan.effective_windows(b.direction)[slot]
-            ds = self._witness.get(plan.id, {}).get((b.direction, slot, "start"), 0.0)
-            de = self._witness.get(plan.id, {}).get((b.direction, slot, "end"), 0.0)
-            s = (w.start_r + ds) * self.C + offsets[node]
-            e = (w.end_r + de) * self.C + offsets[node]
+            witness = self._witness.get(plan.id, {})
+            s = self._window_endpoint_r(plan, b.direction, slot, "start", witness) * self.C + offsets[node]
+            e = self._window_endpoint_r(plan, b.direction, slot, "end", witness) * self.C + offsets[node]
             band_lo = band.start_s + table.cum_T_s[j]
             band_hi = band_lo + band.width_s
             # choose periodic copy containing the band
@@ -483,15 +510,15 @@ class GreedyConstructor:
 
     def _make_solution(self, selection, offsets, bands) -> GreedySolution:
         comp, loss, _ = self._evaluate(selection, offsets, bands)
-        adjustments: dict[tuple[str, Direction, int, Side], float] = {}
+        adjustments: dict[tuple[str, Direction, int], float] = {}
         for iid, plan in selection.items():
+            witness = self._witness.get(plan.id, {})
             for d in ("up", "down"):
-                for k in range(plan.window_count(d)):
-                    for side in ("start", "end"):
-                        if plan.endpoint_is_adjustable(d, k, side):
-                            v = self._witness.get(plan.id, {}).get((d, k, side), 0.0)
-                            if abs(v) > 1e-12:
-                                adjustments[(plan.id, d, k, side)] = float(v)
+                for j in range(plan.boundary_count(d)):
+                    if plan.boundary_is_adjustable(d, j):
+                        v = witness.get((d, j), 0.0)
+                        if abs(v) > 1e-12:
+                            adjustments[(plan.id, d, j)] = float(v)
         return GreedySolution(
             plan_selection={k: v.id for k, v in selection.items()},
             offsets_s={k: float(v) for k, v in offsets.items()},

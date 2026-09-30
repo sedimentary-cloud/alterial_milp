@@ -52,12 +52,12 @@ class ArterialModel:
     def v_offset(self, i: str) -> VarHandle:
         return self.meta.phi[i]
 
-    def v_win(self, i: str, d: Direction, slot: int, side: Side) -> VarHandle:
+    def v_win(self, i: str, d: Direction, slot: int, side: Side) -> LinearExpr:
         ew = self.meta.effective[(i, d)]
         return ew.s[slot] if side == "start" else ew.e[slot]
 
-    def v_adjust(self, plan_id: str, d: Direction, k: int, side: Side) -> VarHandle | None:
-        return self.meta.adj_vars.get((plan_id, d, k, side))
+    def v_adjust(self, plan_id: str, d: Direction, j: int) -> VarHandle | None:
+        return self.meta.boundary_delta.get((plan_id, d, j))
 
     def v_plan(self, plan_id: str) -> VarHandle:
         return self.meta.plan_vars[plan_id]
@@ -145,7 +145,9 @@ class ModelBuilder:
         self._build_offsets()
         self._build_adjustments()
         ew_builder = EffectiveWindowBuilder(self.problem, self.ctx, self.vars, self.cons,
-                                            self.meta.plan_vars, self.meta.adj_vars, self.meta.z_vars)
+                                            self.meta.plan_vars,
+                                            self.meta.boundary_delta,
+                                            self.meta.boundary_z)
         for iid in self.problem.corridor.intersections:
             for d in ("up", "down"):
                 self.meta.effective[(iid, d)] = ew_builder.build(iid, d)
@@ -197,25 +199,52 @@ class ModelBuilder:
             self.meta.phi[iid] = h
 
     def _build_adjustments(self) -> None:
-        # 为每个“可调端点”建一个 δ 变量。
-        # 端点秒值 = (名义比例 + δ) × C。
-        # 固定端点没有 δ，也就没有 z 变量。
+        # v2：为每个“可调相位边界”建 δ 变量。
+        # 边界秒值 = (pos_r + δ) × C。
+        # 多方案时再建 z = x·δ，用 McCormick 线性化。
         for iid in self.problem.corridor.intersections:
-            for p in self.ctx.feasible_plans.get(iid, ()):
+            plans = self.ctx.feasible_plans.get(iid, ())
+            fixed = iid in self.meta.fixed_plans
+            for p in plans:
                 for d in ("up", "down"):
-                    for k in range(p.window_count(d)):
-                        for side in ("start", "end"):
-                            r = p.adjust_range(d, k, side)
-                            nominal = p.nominal_endpoint_r(d, k, side)
-                            expr = LinearExpr.constant(nominal * self.C)
-                            if r is not None:
-                                h = self.vars.add(f"adj[{p.id},{d},{k},{side}]", r.lo_r, r.hi_r,
-                                                  GVarType.CONTINUOUS,
-                                                  {"kind": "adjustment", "plan": p.id,
-                                                   "direction": d, "window": k, "side": side})
-                                self.meta.adj_vars[(p.id, d, k, side)] = h
-                                expr.add(h, self.C)
-                            self.meta.plan_endpoint[(p.id, d, k, side)] = expr
+                    for j in range(p.boundary_count(d)):
+                        r = p.boundary_adjust_range(d, j)
+                        nominal = p.nominal_boundary_r(d, j)
+                        expr = LinearExpr.constant(nominal * self.C)
+                        if r is not None:
+                            delta = self.vars.add(
+                                f"bd[{p.id},{d},{j}]", r[0], r[1], GVarType.CONTINUOUS,
+                                {"kind": "boundary_adjustment", "plan": p.id,
+                                 "direction": d, "boundary": j})
+                            self.meta.boundary_delta[(p.id, d, j)] = delta
+                            expr.add(delta, self.C)
+                            if not fixed:
+                                x = self.meta.plan_vars[p.id]
+                                z = self.vars.add(
+                                    f"bz[{p.id},{d},{j}]", min(0.0, r[0]), max(0.0, r[1]),
+                                    GVarType.CONTINUOUS,
+                                    {"kind": "bilinear_x_delta", "plan": p.id,
+                                     "direction": d, "boundary": j})
+                                self.meta.boundary_z[(p.id, d, j)] = z
+                                self._add_mccormick(x, delta, z, r[0], r[1],
+                                                    p.id, d, j)
+                        self.meta.plan_boundary[(p.id, d, j)] = expr
+
+    def _add_mccormick(self, x: VarHandle, delta: VarHandle, z: VarHandle,
+                       lo: float, hi: float, plan_id: str, d: Direction, j: int) -> None:
+        # z = x·δ，x 是 0/1，δ 在 [lo, hi]。
+        row = LinearExpr.of(z, 1.0).add(x, -hi)
+        self.cons.add(row, "<=", 0.0,
+                      ConstraintMeta("MCC", f"z<=hi*x {plan_id}/{d}/{j}", {"plan": plan_id}))
+        row = LinearExpr.of(z, 1.0).add(x, -lo)
+        self.cons.add(row, ">=", 0.0,
+                      ConstraintMeta("MCC", f"z>=lo*x {plan_id}/{d}/{j}", {"plan": plan_id}))
+        row = LinearExpr.of(z, 1.0).add(delta, -1.0).add(x, -lo)
+        self.cons.add(row, "<=", -lo,
+                      ConstraintMeta("MCC", f"z<=delta-lo(1-x) {plan_id}/{d}/{j}", {"plan": plan_id}))
+        row = LinearExpr.of(z, 1.0).add(delta, -1.0).add(x, -hi)
+        self.cons.add(row, ">=", -hi,
+                      ConstraintMeta("MCC", f"z>=delta-hi(1-x) {plan_id}/{d}/{j}", {"plan": plan_id}))
 
     # ------------------------------------------------------------------
     # C2/C3 plan constraints
@@ -238,13 +267,13 @@ class ModelBuilder:
         expr = LinearExpr()
         for t in terms:
             a = t.atom
-            if a.kind == "endpoint":
+            if a.kind == "boundary":
                 if plan is None:
-                    raise GWModelError("endpoint atom referenced outside a plan constraint")
-                key = (a.plan or plan.id, a.direction, a.window, a.side)
-                if key not in self.meta.plan_endpoint:
-                    raise GWModelError(f"unknown endpoint reference {key}")
-                expr.add(self.meta.plan_endpoint[key], t.coef)
+                    raise GWModelError("boundary atom referenced outside a plan constraint")
+                key = (a.plan or plan.id, a.direction, a.index)
+                if key not in self.meta.plan_boundary:
+                    raise GWModelError(f"unknown boundary reference {key}")
+                expr.add(self.meta.plan_boundary[key], t.coef)
             elif a.kind == "window_duration":
                 plan_id = a.plan or (plan.id if plan is not None else None)
                 if plan_id is None:
@@ -256,17 +285,33 @@ class ModelBuilder:
                     raise GWModelError("window_duration atom requires direction/window scope")
                 if k < 0 or k >= p.window_count(d):
                     raise GWModelError(f"window_duration references unknown window {p.id}/{d}/{k}")
-                start = self.meta.plan_endpoint[(p.id, d, k, "start")]
-                end = self.meta.plan_endpoint[(p.id, d, k, "end")]
-                expr.add(start, -t.coef)
-                expr.add(end, t.coef)
+                w = p.window_edge_span(d, k)
+                start_e = self._edge_value_expr(p, d, w.start_edge)
+                end_e = self._edge_value_expr(p, d, w.end_edge)
+                expr.add(start_e, -t.coef)
+                expr.add(end_e, t.coef)
+                if w.wrap:
+                    expr.add_const(t.coef * self.C)
             elif a.kind == "red_duration":
-                if scope_red is None or scope_rid is None:
-                    raise GWModelError("red_duration atom requires a red-window scope")
-                start = scope_red.start[scope_rid]
-                end = scope_red.end[scope_rid]
-                expr.add(start, -t.coef)
-                expr.add(end, t.coef)
+                if plan is not None and (a.plan is None or a.plan == plan.id):
+                    d_use = a.direction if a.direction is not None else scope_d
+                    rid_use = a.window if a.window is not None else scope_rid
+                    if d_use is None or rid_use is None:
+                        raise GWModelError("red_duration atom requires direction/rid")
+                    reds = plan.derived_red_intervals(d_use)
+                    if rid_use < 1 or rid_use > len(reds):
+                        raise GWModelError(f"red_duration references unknown rid {rid_use}")
+                    red = reds[rid_use - 1]
+                    expr.add(self._edge_duration_expr(plan, d_use,
+                                                      red.start_edge, red.end_edge,
+                                                      red.wrap), t.coef)
+                elif scope_red is not None and scope_rid is not None:
+                    start = scope_red.start[scope_rid]
+                    end = scope_red.end[scope_rid]
+                    expr.add(start, -t.coef)
+                    expr.add(end, t.coef)
+                else:
+                    raise GWModelError("red_duration atom requires a plan or red-window scope")
             elif a.kind == "const":
                 expr.add_const(t.coef * float(a.const or 0.0))
             elif a.kind == "offset":
@@ -288,14 +333,30 @@ class ModelBuilder:
             e.add(model.beta[q], 1.0)
         return e
 
+    def _edge_value_expr(self, plan: PlanSpec, d: Direction, edge: int) -> LinearExpr:
+        """Plan-specific expanded edge expression in seconds (x not multiplied)."""
+        kind, src, offset = plan.expanded_edge_sources(d)[edge]
+        if kind == "const":
+            return LinearExpr.constant(float(offset) * self.C)
+        expr = self.meta.plan_boundary[(plan.id, d, src)].copy()
+        if offset:
+            expr.add_const(offset * self.C)
+        return expr
+
+    def _edge_duration_expr(self, plan: PlanSpec, d: Direction, start_edge: int,
+                            end_edge: int, wrap: int) -> LinearExpr:
+        expr = self._edge_value_expr(plan, d, end_edge)
+        expr.add(self._edge_value_expr(plan, d, start_edge), -1.0)
+        if wrap:
+            expr.add_const(self.C)
+        return expr
 
     def _max_effective_end_seconds(self, intersection: str, d: Direction) -> float:
         best = 0.0
         for p in self.ctx.feasible_plans.get(intersection, ()):
-            for k, w in enumerate(p.effective_windows(d)):
-                r = p.adjust_range(d, k, "end")
-                hi = r.hi_r if r is not None else 0.0
-                best = max(best, (w.end_r + max(0.0, hi)) * self.C)
+            for k in range(p.window_count(d)):
+                _, hi = p.window_endpoint_bound_r(d, k, "end")
+                best = max(best, hi * self.C)
         return best
 
     def _green_n_lower(self, intersection: str, d: Direction) -> int:
@@ -309,12 +370,14 @@ class ModelBuilder:
         total = 0.0
         for t in c.terms:
             a = t.atom
-            if a.kind == "endpoint" and plan is not None:
-                nom = plan.nominal_endpoint_r(a.direction, a.window, a.side)
-                r = plan.adjust_range(a.direction, a.window, a.side)
-                lov = (nom + (r.lo_r if r is not None else 0.0)) * self.C
-                hiv = (nom + (r.hi_r if r is not None else 0.0)) * self.C
+            if a.kind == "boundary" and plan is not None:
+                nom = plan.nominal_boundary_r(a.direction, a.index)
+                r = plan.boundary_adjust_range(a.direction, a.index)
+                lov = (nom + (r[0] if r is not None else 0.0)) * self.C
+                hiv = (nom + (r[1] if r is not None else 0.0)) * self.C
                 atom_ub = max(abs(lov), abs(hiv), 3.0 * self.C)
+            elif a.kind == "window_duration":
+                atom_ub = 3.0 * self.C
             elif a.kind == "offset":
                 atom_ub = self.C
             elif a.kind == "const":
@@ -341,11 +404,10 @@ class ModelBuilder:
         return lo, hi
 
     def _window_endpoint_bounds(self, plan: PlanSpec, d: Direction, k0: int, side: Side):
-        """单个方案某个有效窗口端点的秒值上下界（含可调范围）。"""
-        nominal = plan.nominal_endpoint_r(d, k0, side) * self.C
-        r = plan.adjust_range(d, k0, side)
-        lo = nominal + (r.lo_r if r is not None else 0.0) * self.C
-        hi = nominal + (r.hi_r if r is not None else 0.0) * self.C
+        """单个方案某个派生窗口端点的秒值上下界（含边界可调范围）。"""
+        lo_r, hi_r = plan.window_endpoint_bound_r(d, k0, side)
+        lo = lo_r * self.C
+        hi = hi_r * self.C
         return (lo, hi) if lo <= hi else (hi, lo)
 
     def _window_slot_bounds(self, gw: EffectiveWindowSet):
@@ -687,12 +749,10 @@ class ModelBuilder:
                     continue
                 for d in scope.directions:
                     for k in range(p.window_count(d)):
-                        if scope.skip_double_cycle_copies and p.effective_is_copy(d, k):
+                        if scope.skip_double_cycle_copies and p.is_copy_window(d, k):
                             continue
-                        if scope.window_indices is not None:
-                            orig = p.effective_original_index(d, k)
-                            if orig not in scope.window_indices:
-                                continue
+                        if scope.window_indices is not None and k not in scope.window_indices:
+                            continue
                         yield p, d, k
 
     def _build_constraint_templates(self) -> None:
@@ -701,27 +761,45 @@ class ModelBuilder:
             rhs = tmpl.rhs_for_cycle(self.C)
             M = self.m.containment + abs(rhs) + 1.0
             if tmpl.scope.kind == "all_plan_red_windows":
-                for p, d, red, rid in self._iter_template_red_scope(tmpl):
-                    lhs = self._terms_expr(
-                        tmpl.terms, constraint_id=tmpl.id,
-                        plan=p, scope_d=d, scope_red=red, scope_rid=rid,
-                    )
-                    act = red.avail[rid]
-                    label = f"{tmpl.id}:{p.id}:{d}:red{rid}"
-                    refs = {"template": tmpl.id, "plan": p.id,
-                            "direction": d, "red_window": str(rid)}
-                    if tmpl.hard:
-                        self._add_activated_hard_expr(lhs, tmpl.sense, rhs, act, M,
-                                                      "TEMPLATE_HARD", label, refs)
-                    else:
-                        assert tmpl.soft is not None
-                        self._add_activated_soft_expr(
-                            lhs, tmpl.sense, rhs, act,
-                            coef=tmpl.soft.coef, owner=tmpl.soft.owner,
-                            plan_id=p.id, m_big=M,
-                            meta_group="TEMPLATE_SOFT", meta_label_base=label,
-                            name_base=label, constraint_id_base=label, refs=refs,
-                        )
+                scope = tmpl.scope
+                for iid in self.problem.corridor.intersections:
+                    for p in self.ctx.feasible_plans.get(iid, ()):
+                        if scope.plan_ids is not None and p.id not in scope.plan_ids:
+                            continue
+                        for d in scope.directions:
+                            try:
+                                reds = p.derived_red_intervals(d)
+                            except ValueError:
+                                continue
+                            for red in reds:
+                                if scope.window_indices is not None and red.rid not in scope.window_indices:
+                                    continue
+                                if red.width_r <= 1e-9:
+                                    continue
+                                lhs = self._terms_expr(
+                                    tmpl.terms, constraint_id=tmpl.id,
+                                    plan=p, scope_d=d,
+                                    scope_red=None, scope_rid=red.rid,
+                                )
+                                fixed = p.intersection in self.meta.fixed_plans
+                                x = None if fixed else self.meta.plan_vars[p.id]
+                                label = f"{tmpl.id}:{p.id}:{d}:red{red.rid}"
+                                refs = {"template": tmpl.id, "plan": p.id,
+                                        "direction": d, "red_window": str(red.rid)}
+                                if tmpl.hard:
+                                    self._add_activated_hard(lhs, tmpl.sense, rhs, x, M,
+                                                             "TEMPLATE_HARD", label, refs)
+                                else:
+                                    assert tmpl.soft is not None
+                                    self._add_activated_soft(
+                                        lhs, tmpl.sense, rhs,
+                                        coef=tmpl.soft.coef, owner=tmpl.soft.owner,
+                                        plan_id=p.id, x=x, m_big=M,
+                                        meta_group="TEMPLATE_SOFT",
+                                        meta_label_base=label,
+                                        name_base=label,
+                                        constraint_id_base=label, refs=refs,
+                                    )
                 continue
 
             for p, d, k in self._iter_template_scope(tmpl):
@@ -755,87 +833,43 @@ class ModelBuilder:
     # plan-level window ordering (V1/V2 after adjustment)
     # ------------------------------------------------------------------
     def _build_plan_window_constraints(self) -> None:
-        # 保证选中方案的窗口在微调后仍然合法：
-        # start >= 0，end <= 2C，start <= end，相邻窗口不重叠。
-        # 单方案路口可直接添加这些约束，不需要 big-M。
+        # v2 内置几何约束：边界排序 + min_phase_s。
+        # δ 只被本方案的约束引用，未选中时这些约束只约束自由变量，无害。
+        g = (min(p.min_phase_s for p in self.problem.plans) / self.C
+             if self.problem.plans else 0.0)
         for iid in self.problem.corridor.intersections:
-            fixed = iid in self.meta.fixed_plans
             for p in self.ctx.feasible_plans.get(iid, ()):
-                x = None if fixed else self.meta.plan_vars[p.id]
-                M = self.m.plan_activation
                 for d in ("up", "down"):
-                    n = p.window_count(d)
-                    for k in range(n):
-                        s_expr = self.meta.plan_endpoint[(p.id, d, k, "start")]
-                        e_expr = self.meta.plan_endpoint[(p.id, d, k, "end")]
-                        for label, row, sense, rhs in (
-                            ("start_min", s_expr.copy(), ">=", 0.0),
-                            ("end_max", e_expr.copy(), "<=", 2.0 * self.C),
-                        ):
-                            if x is not None:
-                                row.add(x, -M if sense == ">=" else M)
-                                rhs_eff = -M if sense == ">=" else 2.0 * self.C + M
-                            else:
-                                rhs_eff = rhs
-                            self.cons.add(row, sense, rhs_eff,
-                                          ConstraintMeta("PLAN_WINDOW", f"{p.id}:{d}:{k}:{label}",
-                                                         {"plan": p.id}))
-                        row = s_expr.copy(); row.add(e_expr, -1.0)
-                        if x is not None:
-                            row.add(x, M)
-                            self.cons.add(row, "<=", M,
-                                          ConstraintMeta("PLAN_WINDOW", f"{p.id}:{d}:{k}:order",
-                                                         {"plan": p.id}))
-                        else:
-                            self.cons.add(row, "<=", 0.0,
-                                          ConstraintMeta("PLAN_WINDOW", f"{p.id}:{d}:{k}:order",
-                                                         {"plan": p.id}))
-                    for k in range(n - 1):
-                        a = self.meta.plan_endpoint[(p.id, d, k, "end")]
-                        b = self.meta.plan_endpoint[(p.id, d, k + 1, "start")]
-                        row = a.copy(); row.add(b, -1.0)
-                        if x is not None:
-                            row.add(x, M)
-                            self.cons.add(row, "<=", M,
-                                          ConstraintMeta("PLAN_WINDOW", f"{p.id}:{d}:{k}:nonoverlap",
-                                                         {"plan": p.id}))
-                        else:
-                            self.cons.add(row, "<=", 0.0,
-                                          ConstraintMeta("PLAN_WINDOW", f"{p.id}:{d}:{k}:nonoverlap",
-                                                         {"plan": p.id}))
+                    m = p.boundary_count(d)
+                    if m == 0:
+                        continue
+                    hi = 0.5 if p.double_cycle else 1.0
+                    gg = p.min_phase_s / self.C
+                    b0 = self.meta.plan_boundary[(p.id, d, 0)]
+                    self.cons.add(b0.copy(), ">=", gg * self.C,
+                                  ConstraintMeta("PLAN_WINDOW", f"{p.id}:{d}:b0:min_phase",
+                                                 {"plan": p.id, "direction": d}))
+                    for j in range(m - 1):
+                        a = self.meta.plan_boundary[(p.id, d, j)]
+                        b = self.meta.plan_boundary[(p.id, d, j + 1)]
+                        row = a.copy()
+                        row.add(b, -1.0)
+                        self.cons.add(row, "<=", -gg * self.C,
+                                      ConstraintMeta("PLAN_WINDOW",
+                                                     f"{p.id}:{d}:b{j}:min_phase",
+                                                     {"plan": p.id, "direction": d}))
+                    bm = self.meta.plan_boundary[(p.id, d, m - 1)]
+                    self.cons.add(bm.copy(), "<=", (hi - gg) * self.C,
+                                  ConstraintMeta("PLAN_WINDOW", f"{p.id}:{d}:bm:max",
+                                                 {"plan": p.id, "direction": d}))
 
     # ------------------------------------------------------------------
     # C11 double cycle
     # ------------------------------------------------------------------
     def _build_double_cycle_links(self) -> None:
-        # C11：双周期方案的复制窗口必须和原始窗口保持同样的端点微调量。
-        # 否则求解器会让两个半周期不对称，等价于偷偷变成全周期方案。
-        for iid in self.problem.corridor.intersections:
-            for p in self.ctx.feasible_plans.get(iid, ()):
-                if not p.double_cycle:
-                    continue
-                for d in ("up", "down"):
-                    orig_to_eff: dict[int, int] = {}
-                    for k in range(p.window_count(d)):
-                        if not p.effective_is_copy(d, k):
-                            orig_to_eff[p.effective_original_index(d, k)] = k
-                    for k in range(p.window_count(d)):
-                        if not p.effective_is_copy(d, k):
-                            continue
-                        orig = p.effective_original_index(d, k)
-                        ko = orig_to_eff.get(orig)
-                        if ko is None:
-                            continue
-                        for side in ("start", "end"):
-                            hc = self.meta.adj_vars.get((p.id, d, k, side))
-                            ho = self.meta.adj_vars.get((p.id, d, ko, side))
-                            if hc is None or ho is None:
-                                continue
-                            row = LinearExpr.of(hc, 1.0).add(ho, -1.0)
-                            self.cons.add(row, "==", 0.0,
-                                          ConstraintMeta("C11", f"{p.id}:{d}:{k}:{side}:double_copy",
-                                                         {"plan": p.id, "direction": d,
-                                                          "copy_window": str(k), "orig_window": str(ko)}))
+        # v2 的双周期边界在 (0, 0.5) 声明，展开时复制边界直接复用同一个 δ，
+        # 因此一致性是结构性的，不需要额外等式。
+        return
 
     # ------------------------------------------------------------------
     # C4-C8 green bands

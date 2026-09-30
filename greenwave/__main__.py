@@ -18,9 +18,9 @@ def _solution_view(sol_dict):
     adjustments = {}
     for key, value in (sol_dict.get("adjustments") or {}).items():
         parts = key.split(".")
-        if len(parts) == 4:
-            pid, d, k, side = parts
-            adjustments[(pid, d, int(k), side)] = float(value)
+        if len(parts) == 3:
+            pid, d, j = parts
+            adjustments[(pid, d, int(j))] = float(value)
     bands = []
     for b in sol_dict.get("bands", []):
         bands.append(ConstructedBand(

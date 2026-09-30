@@ -16,11 +16,17 @@ Linux prefix（WSL 下使用 `python3.11`）。
 - matplotlib
 - highspy（可选后端）
 
-## 输入要点
+## 输入要点（v2：相位边界建模）
 
 - 路段长度支持统一值 `distance_m`，也支持分方向覆盖：`distance_up_m` / `distance_down_m`；
   某方向未单独给出时回退到 `distance_m`。
 - 上下行设计速度继续使用 `speed_up_mps` / `speed_down_mps`。
+- 每个 `plan.directions[d]` 声明一串有序相位边界 `boundaries: [{pos_r, adjust}]`
+  和等长的 `green_mask`；绿灯窗口/红窗是**派生量**。
+- `green_mask` 长度 = 边界数 + 1；一个方向必须同时有绿区间和红区间；
+  首尾区间不能同时为绿（用户需要自己轮转输入，让完整绿区间落在一个周期内）。
+- 双周期方案在半周期 `(0, 0.5)` 内声明边界，0.5 是强制边界；复制窗口复用同一组 δ。
+- `min_phase_s` 默认 `1e-3`，是吸收 MILP 容差的数值保护；业务最小相位请显式配置。
 
 ## 快速开始
 
@@ -48,7 +54,7 @@ greenwave/
 ├── schema/          # 不可变输入模型 + 静态校验 V1–V10
 ├── preprocess/      # 格点常量化 + 方案可行性 LP 过滤
 ├── heuristic/       # 贪心初始解 / 块坐标 refinement
-├── model/           # 变量注册表、有效窗口、C1–C11、目标装配
+├── model/           # 变量注册表、派生窗口、C1–C13、目标装配
 ├── solve/           # scipy 后端（基线）与 highspy 后端
 ├── grid/            # 多格点并行遍历
 ├── pareto/          # 两阶段 epsilon-constraint
@@ -192,9 +198,11 @@ python -m unittest discover -s tests -v
 ## 设计要点
 
 - 建模层不依赖 scipy 求解 API；`model/` 只输出变量表、稀疏约束、目标向量。
-- 有效窗口重构（4.2）按 `(带, 路口, 方向, 槽位)` 指派，双线性项 `z = x·δ`
-  用 McCormick 线性化。
-- 红波带只能存在于相邻路口间，红窗由下游有效绿窗的补集生成，并显式包含
-  跨 0/C 段。
+- 相位边界是决策变量；绿灯窗口由 `boundaries + green_mask` 派生，窗口端点是
+  边界 δ 的线性表达式。
+- 双线性项 `z = x·δ` 用 McCormick 线性化。
+- 红窗是整周期绿窗的补集，plan-native 编号 `rid = 1..K`；`rid=K` 是循环意义上
+  最后一段红，可能跨 0/C。
+- 红波带只能存在于相邻路口间。
 - 周期 `C` 与速度倍率 `κ` 格点化；阶段 1 最大化 composite，阶段 2 用
   ε-constraint 扫描 Pareto 前沿。

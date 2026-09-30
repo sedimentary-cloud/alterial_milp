@@ -30,7 +30,7 @@ def build_problem() -> dict:
     # 这里要 20 个点，所以 num_points=19。
     problem = copy.deepcopy(problem)
     problem["objective"]["pareto"] = {
-        "num_points": 19,
+        "num_points": 20,
         "relax_max": problem["objective"].get("pareto", {}).get("relax_max", 0.3),
         "topk_grids": 1,
     }

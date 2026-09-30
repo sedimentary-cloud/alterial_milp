@@ -1,21 +1,26 @@
-"""语义寻址：把用户 WindowRef/Target 解析成具体 plan / 有效窗口 / 红窗 rid。"""
+"""语义寻址：把用户 WindowRef/Target 解析成具体 plan / 派生窗口 / 红窗 rid。
+
+v2 是 plan-native 的：
+- 绿窗由 plan 自己的 boundaries + green_mask 派生，不依赖路口里有多少个 plan；
+- 红窗也由同一个 plan 派生，rid 1..K 固定；
+- 双周期时语义寻址使用“前半周期代表窗口”，复制窗口结构性共享同一组边界。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from ..errors import GWSemanticError
-from ..model.red_math import RedInterval
 from ..schema.models import Direction, PlanSpec, ProblemInput
 from .ledger import describe_red_ledger, red_ledger
-from .models import Target, WindowRef
+from .models import Target
 
 
 @dataclass(frozen=True)
 class GreenSlotRef:
     plan: PlanSpec
     direction: Direction
-    original_index: int
-    effective_index: int
+    original_index: int       # declared window index (0-based, half-cycle for double)
+    effective_index: int      # index in plan.derived_windows(d)
 
 
 @dataclass(frozen=True)
@@ -23,7 +28,7 @@ class RedIntervalRef:
     plan: PlanSpec
     direction: Direction
     rid: int
-    interval: RedInterval
+    interval: object
 
 
 def _fail(rule_id: str, target_desc: str, reason: str, candidates=()) -> GWSemanticError:
@@ -53,7 +58,7 @@ def _plan_for_target(problem: ProblemInput, target: Target, rule_id: str) -> Pla
         raise _fail(rule_id, _target_desc(target),
                     f"plan {plan.id!r} belongs to {plan.intersection!r}, "
                     f"not {target.intersection!r}")
-    if not plan.effective_windows(target.direction):
+    if not plan.derived_windows(target.direction):
         raise _fail(rule_id, _target_desc(target),
                     f"plan {plan.id!r} has no {target.direction} green windows")
     return plan
@@ -64,23 +69,21 @@ def resolve_green_slot(problem: ProblemInput, target: Target, rule_id: str) -> G
     ref = target.window
     if ref.kind != "green":
         raise _fail(rule_id, _target_desc(target), "expected a green window reference")
-    entries = plan._effective_entries(target.direction)
-    originals = [(i, e) for i, e in enumerate(entries) if not e[2]]
+    d = target.direction
+    all_windows = plan.derived_windows(d)
+    declared = [k for k in range(len(all_windows)) if not plan.is_copy_window(d, k)]
+    if not declared:
+        raise _fail(rule_id, _target_desc(target), "plan has no declared green windows")
     if ref.index is not None:
-        match = [(eff_i, e) for eff_i, e in originals if e[1] == ref.index]
-        if not match:
+        if ref.index < 0 or ref.index >= len(declared):
             raise _fail(rule_id, _target_desc(target),
                         f"declared green window index {ref.index} does not exist",
-                        [f"declared index {e[1]} -> effective index {eff_i}"
-                         for eff_i, e in originals])
-        eff_i, entry = match[0]
-        return GreenSlotRef(plan, target.direction, entry[1], eff_i)
-    # position first/last by start_r among original windows
-    sorted_originals = sorted(originals, key=lambda pair: pair[1][0].start_r)
-    if not sorted_originals:
-        raise _fail(rule_id, _target_desc(target), "plan has no non-copy green windows")
-    eff_i, entry = sorted_originals[0 if ref.position == "first" else -1]
-    return GreenSlotRef(plan, target.direction, entry[1], eff_i)
+                        [f"declared index {i} -> effective index {declared[i]}"
+                         for i in range(len(declared))])
+        declared_index = ref.index
+    else:
+        declared_index = 0 if ref.position == "first" else len(declared) - 1
+    return GreenSlotRef(plan, d, declared_index, declared[declared_index])
 
 
 def resolve_red_interval(problem: ProblemInput, target: Target, rule_id: str) -> RedIntervalRef:
@@ -88,39 +91,30 @@ def resolve_red_interval(problem: ProblemInput, target: Target, rule_id: str) ->
     ref = target.window
     if ref.kind != "red":
         raise _fail(rule_id, _target_desc(target), "expected a red window reference")
-    # v1: 红窗寻址只允许单方案路口，避免运行时 rid 漂移。
-    same_intersection = problem.plans_of(target.intersection)
-    if len(same_intersection) != 1:
-        raise _fail(rule_id, _target_desc(target),
-                    "red-window addressing is only supported for a single-plan "
-                    "intersection in v1",
-                    [p.id for p in same_intersection])
-    ledger = red_ledger(plan, target.direction)
+    d = target.direction
+    ledger = red_ledger(plan, d)
     if not ledger:
         raise _fail(rule_id, _target_desc(target),
                     f"plan {plan.id!r} has no red intervals")
-    by_rid = {item.rid: item for item in ledger}
     if ref.index is not None:
         rid = ref.index
+        if rid < 1 or rid > len(ledger):
+            raise _fail(rule_id, _target_desc(target),
+                        f"red interval rid={rid} does not exist",
+                        describe_red_ledger(plan, d))
     else:
         k = int(ref.after_green or 0)
-        k_green = len(plan.effective_windows(target.direction))
-        if k < 1 or k > k_green:
+        if k < 1 or k > len(ledger):
             raise _fail(rule_id, _target_desc(target),
-                        f"after_green={k} out of range 1..{k_green}",
-                        describe_red_ledger(plan, target.direction))
-        # k < K: gap after green k = rid k; k == K: wrap after green K = rid 2K-1
-        rid = k if k < k_green else (2 * k_green - 1)
-    item = by_rid.get(rid)
-    if item is None:
-        raise _fail(rule_id, _target_desc(target),
-                    f"red interval rid={rid} does not exist",
-                    describe_red_ledger(plan, target.direction))
-    if item.degenerate:
+                        f"after_green={k} out of range 1..{len(ledger)}",
+                        describe_red_ledger(plan, d))
+        rid = k
+    item = ledger[rid - 1]
+    if item.width_r <= 1e-9:
         raise _fail(rule_id, _target_desc(target),
                     f"red interval rid={rid} is degenerate/zero-length",
-                    describe_red_ledger(plan, target.direction))
-    return RedIntervalRef(plan, target.direction, rid, item)
+                    describe_red_ledger(plan, d))
+    return RedIntervalRef(plan, d, rid, item)
 
 
 __all__ = ["GreenSlotRef", "RedIntervalRef", "resolve_green_slot", "resolve_red_interval"]

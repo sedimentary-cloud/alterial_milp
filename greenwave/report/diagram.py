@@ -37,11 +37,8 @@ RED_PERIOD_COLOR = "red"
 UP_BAND_COLOR = "#4AC52E"
 DOWN_BAND_COLOR = "#3077e2"
 RED_BAND_COLOR = "#d62728"
-UP_BAND_HATCH = "..."
-DOWN_BAND_HATCH = "ooo"
-RED_BAND_HATCH = "///"
 BAND_ALPHA = 0.50
-BAND_HATCH_LINEWIDTH = 0.25
+BAND_EDGE_LINEWIDTH = 0.4
 
 
 # 时距图绘制器。
@@ -99,17 +96,43 @@ class TimeSpaceDiagram:
             # the next cycle's red base rectangle.
             for d, base_y, green_color in (("up", up_y, UP_GREEN_WINDOW_COLOR),
                                            ("down", down_y, DOWN_GREEN_WINDOW_COLOR)):
-                for widx, w in enumerate(plan.effective_windows(d)):
-                    adj_s = solution.adjustments_r.get((pid, d, widx, "start"), 0.0)
-                    adj_e = solution.adjustments_r.get((pid, d, widx, "end"), 0.0)
-                    ws = (w.start_r + adj_s) * C + phi
-                    we = (w.end_r + adj_e) * C + phi
+                for widx in range(plan.window_count(d)):
+                    ws_r = _window_endpoint_ratio(plan, d, widx, "start",
+                                                  solution.adjustments_r, pid)
+                    we_r = _window_endpoint_ratio(plan, d, widx, "end",
+                                                  solution.adjustments_r, pid)
+                    ws = ws_r * C + phi
+                    we = we_r * C + phi
                     if we <= ws:
                         continue
                     for k in range(k_min, k_max + 1):
                         ax.add_patch(Rectangle((k * C + ws, base_y), we - ws, bar_h,
                                                facecolor=green_color, edgecolor="none",
                                                alpha=1.0, zorder=7))
+            # Pass 3: thin black ticks for phase boundaries and cycle boundaries.
+            # Cycle boundary: one thin line across both up/down lanes at each
+            # visible signal cycle start (offset by this intersection's phi).
+            for k in range(k_min, k_max + 1):
+                tc = phi + k * C
+                if tc < t_min - 1e-9 or tc > t_max + 1e-9:
+                    continue
+                ax.plot([tc, tc], [y0 - bar_h, y0 + bar_h],
+                        color="black", linewidth=0.7, alpha=0.85,
+                        zorder=9, solid_capstyle="butt")
+            # Phase boundary: short thin ticks on each direction's lane.
+            for d, lane_center in (("up", lane_y(node, "up")),
+                                   ("down", lane_y(node, "down"))):
+                sources = plan.expanded_edge_sources(d)
+                half = bar_h * 0.42
+                for edge in range(1, len(sources) - 1):
+                    ratio = _actual_edge_ratio(plan, d, edge, solution, pid)
+                    for k in range(k_min, k_max + 1):
+                        tb = phi + k * C + ratio * C
+                        if tb < t_min - 1e-9 or tb > t_max + 1e-9:
+                            continue
+                        ax.plot([tb, tb], [lane_center - half, lane_center + half],
+                                color="black", linewidth=0.5, alpha=0.80,
+                                zorder=9, solid_capstyle="butt")
             ax.axhline(y0, color="black", linewidth=0.7, zorder=8)
             ax.text(t_min + 0.005 * (t_max - t_min), y0, node,
                     ha="left", va="center", fontsize=9, fontweight="bold",
@@ -121,11 +144,11 @@ class TimeSpaceDiagram:
         # 2. 绿波带/红波带：按周期重复绘制，铺满整个可见时间范围。
         # ------------------------------------------------------------------
         band_handles_added = {"up": False, "down": False, "red": False}
+        annotations: list[dict] = []
         for band in solution.bands:
             demand = problem.demand(band.demand)
             if demand.type == "green":
                 color = UP_BAND_COLOR if demand.direction == "up" else DOWN_BAND_COLOR
-                hatch = UP_BAND_HATCH if demand.direction == "up" else DOWN_BAND_HATCH
                 table = ctx.travel[demand.id]
                 node_ys = [lane_y(n, demand.direction) for n in demand.nodes]
                 # Use the representative copy whose chain-head start lies in [0, C).
@@ -142,19 +165,21 @@ class TimeSpaceDiagram:
                              + list(zip(t_right[::-1], node_ys[::-1])))
                     ax.add_patch(Polygon(verts, closed=True,
                                          facecolor=_band_facecolor(color, BAND_ALPHA),
-                                         edgecolor=color, linewidth=BAND_HATCH_LINEWIDTH,
-                                         hatch=hatch, zorder=3))
+                                         edgecolor=color, linewidth=BAND_EDGE_LINEWIDTH,
+                                         zorder=3))
                 band_handles_added[demand.direction] = True
                 # one readable label per demand
                 mid = len(demand.nodes) // 2
                 label_x = base_times[mid] + band.width_s / 2.0
                 label_y = node_ys[mid]
-                ax.annotate(f"{band.demand}\n{band.width_s:.1f}s",
-                            xy=(label_x, label_y),
-                            xytext=(label_x, label_y + (bar_h * 1.8 if demand.direction == "up" else -bar_h * 1.8)),
-                            ha="center", va="center", fontsize=7.5, color=color,
-                            arrowprops=dict(arrowstyle="-", color=color, lw=0.7, alpha=0.8),
-                            zorder=12, clip_on=True)
+                annotations.append({
+                    "text": f"{band.demand}\n{band.width_s:.1f}s",
+                    "base_x": label_x,
+                    "target_y": label_y,
+                    "label_y": label_y + (bar_h * 1.8 if demand.direction == "up" else -bar_h * 1.8),
+                    "color": color,
+                    "min_dx": max(10.0, 0.10 * C),
+                })
             else:
                 up_node, down_node = demand.nodes
                 y_up = lane_y(up_node, demand.direction)
@@ -179,8 +204,8 @@ class TimeSpaceDiagram:
                     ax.add_patch(Polygon(verts, closed=True,
                                          facecolor=_band_facecolor(RED_BAND_COLOR, BAND_ALPHA),
                                          edgecolor=RED_BAND_COLOR,
-                                         linewidth=BAND_HATCH_LINEWIDTH,
-                                         hatch=RED_BAND_HATCH, zorder=3))
+                                         linewidth=BAND_EDGE_LINEWIDTH,
+                                         zorder=3))
                     ax.plot([us, ds], [y_up, y_down], color=RED_BAND_COLOR,
                             linewidth=1.1, zorder=4)
                     ax.plot([ue, de], [y_up, y_down], color=RED_BAND_COLOR,
@@ -188,11 +213,19 @@ class TimeSpaceDiagram:
                 band_handles_added["red"] = True
                 label_x = down_start_base + band.width_s / 2.0
                 label_y = (y_up + y_down) / 2.0
-                ax.annotate(f"{band.demand}\n{band.width_s:.1f}s",
-                            xy=(label_x, label_y), xytext=(label_x, label_y + bar_h * 2.2),
-                            ha="center", va="center", fontsize=7.5, color=RED_BAND_COLOR,
-                            arrowprops=dict(arrowstyle="-", color=RED_BAND_COLOR, lw=0.7, alpha=0.8),
-                            zorder=12, clip_on=True)
+                annotations.append({
+                    "text": f"{band.demand}\n{band.width_s:.1f}s",
+                    "base_x": label_x,
+                    "target_y": label_y,
+                    "label_y": label_y + bar_h * 2.2,
+                    "color": RED_BAND_COLOR,
+                    "min_dx": max(10.0, 0.10 * C),
+                })
+
+        # ------------------------------------------------------------------
+        # 2b. 波带文字：可移到不同周期副本，避免拥挤。
+        # ------------------------------------------------------------------
+        _draw_band_annotations(ax, annotations, t_min, t_max, C, bar_h)
 
         # ------------------------------------------------------------------
         # 3. 坐标轴、图例和标题。
@@ -214,20 +247,24 @@ class TimeSpaceDiagram:
             Patch(facecolor=UP_GREEN_WINDOW_COLOR, label="Up green window"),
             Patch(facecolor=DOWN_GREEN_WINDOW_COLOR, label="Down green window"),
             Patch(facecolor=RED_PERIOD_COLOR, label="Red period"),
+            Line2D([0], [0], color="black", linewidth=0.8,
+                   label="Phase / cycle boundary"),
         ]
         if band_handles_added["up"]:
             handles.append(Patch(facecolor=_band_facecolor(UP_BAND_COLOR, BAND_ALPHA),
-                                 edgecolor=UP_BAND_COLOR, hatch=UP_BAND_HATCH,
-                                 linewidth=BAND_HATCH_LINEWIDTH, label="Up green band"))
+                                 edgecolor=UP_BAND_COLOR,
+                                 linewidth=BAND_EDGE_LINEWIDTH, label="Up green band"))
         if band_handles_added["down"]:
             handles.append(Patch(facecolor=_band_facecolor(DOWN_BAND_COLOR, BAND_ALPHA),
-                                 edgecolor=DOWN_BAND_COLOR, hatch=DOWN_BAND_HATCH,
-                                 linewidth=BAND_HATCH_LINEWIDTH, label="Down green band"))
+                                 edgecolor=DOWN_BAND_COLOR,
+                                 linewidth=BAND_EDGE_LINEWIDTH, label="Down green band"))
         if band_handles_added["red"]:
             handles.append(Patch(facecolor=_band_facecolor(RED_BAND_COLOR, BAND_ALPHA),
-                                 edgecolor=RED_BAND_COLOR, hatch=RED_BAND_HATCH,
-                                 linewidth=BAND_HATCH_LINEWIDTH, label="Red band"))
-        ax.legend(handles=handles, loc="lower right", fontsize=8, framealpha=0.95)
+                                 edgecolor=RED_BAND_COLOR,
+                                 linewidth=BAND_EDGE_LINEWIDTH, label="Red band"))
+        legend = ax.legend(handles=handles, loc="lower right", fontsize=8,
+                           framealpha=0.95)
+        legend.set_zorder(40)
 
         fig.tight_layout()
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
@@ -337,6 +374,96 @@ def _max_corridor_travel(ctx, names) -> float:
     return max(_corridor_travel_up(ctx, names), _corridor_travel_down(ctx, names), 0.0)
 
 
+def _window_endpoint_ratio(plan, direction: str, k: int, side: str,
+                           adjustments_r, pid: str) -> float:
+    """Derived window endpoint in cycle-ratio domain (v2 boundary model)."""
+    w = plan.window_edge_span(direction, k)
+    edge = w.start_edge if side == "start" else w.end_edge
+    kind, src, offset = plan.expanded_edge_sources(direction)[edge]
+    if kind == "const":
+        base = float(offset)
+    else:
+        base = (plan.nominal_boundary_r(direction, src) + offset
+                + adjustments_r.get((pid, direction, src), 0.0))
+    if side == "end":
+        base += w.wrap
+    return base
+
+
+def _actual_edge_ratio(plan, direction: str, edge: int, solution, pid: str) -> float:
+    """Actual expanded-edge ratio including declared boundary adjustments."""
+    kind, src, offset = plan.expanded_edge_sources(direction)[edge]
+    if kind == "const":
+        return float(offset)
+    delta = solution.adjustments_r.get((pid, direction, src), 0.0)
+    return plan.nominal_boundary_r(direction, src) + delta + float(offset)
+
+
+def _draw_band_annotations(ax, annotations, t_min: float, t_max: float,
+                           C: float, bar_h: float) -> None:
+    """Place band labels on periodic copies to reduce overlap."""
+    if not annotations:
+        return
+    placed: list[dict] = []
+    cycle_load: dict[int, int] = {}
+
+    def vertical_overlap(y1: float, y2: float) -> bool:
+        return abs(y1 - y2) < 1.8 * bar_h
+
+    # Process left-most first so early labels get the natural first choice.
+    for ann in sorted(annotations, key=lambda a: (a["base_x"], -a["label_y"])):
+        base_x = ann["base_x"]
+        min_dx = float(ann.get("min_dx", max(10.0, 0.10 * C)))
+        # Candidate periodic copies: (cycle_index, absolute_label_time)
+        candidates: list[tuple[int, float]] = []
+        margin = 0.02 * C
+        m = 0
+        while True:
+            x = base_x + m * C
+            if x > t_max - margin + 1e-9 and m > 0:
+                break
+            if x >= t_min + margin - 1e-9 and x <= t_max - margin + 1e-9:
+                candidates.append((m, x))
+            if x > t_max + margin:
+                break
+            m += 1
+        if not candidates:
+            candidates = [(0, min(max(base_x, t_min + margin), t_max - margin))]
+
+        best_cycle = candidates[0][0]
+        best_x = candidates[0][1]
+        best_cost = None
+        for cycle, x in candidates:
+            cost = 0.0
+            for p in placed:
+                if vertical_overlap(ann["label_y"], p["label_y"]):
+                    dx = abs(x - p["x"])
+                    if dx < min_dx:
+                        cost += (min_dx - dx) ** 2
+            # Spread labels evenly across visible cycle copies.
+            cost += 1.0 * cycle_load.get(cycle, 0)
+            # Very slight preference for earlier copies when everything else ties.
+            cost += 0.01 * cycle
+            if best_cost is None or cost < best_cost - 1e-12:
+                best_cost = cost
+                best_cycle = cycle
+                best_x = x
+        cycle_load[best_cycle] = cycle_load.get(best_cycle, 0) + 1
+        placed.append({"x": best_x, "label_y": ann["label_y"]})
+
+        ax.annotate(
+            ann["text"],
+            xy=(best_x, ann["target_y"]),
+            xytext=(best_x, ann["label_y"]),
+            ha="center", va="center", fontsize=ann.get("fontsize", 7.5),
+            color=ann["color"],
+            arrowprops=dict(arrowstyle="-", color=ann["color"], lw=0.7, alpha=0.8),
+            bbox=dict(facecolor="white", edgecolor="none", alpha=0.75,
+                      boxstyle="round,pad=0.25"),
+            zorder=30, clip_on=True,
+        )
+
+
 def _green_intervals_for_plan(solution, problem, node: str, direction: str,
                               phi_s: float, C: float,
                               n_min: int = -6, n_max: int = 6):
@@ -344,11 +471,13 @@ def _green_intervals_for_plan(solution, problem, node: str, direction: str,
     pid = solution.plan_selection[node]
     plan = problem.plan(pid)
     intervals = []
-    for widx, w in enumerate(plan.effective_windows(direction)):
-        adj_s = solution.adjustments_r.get((pid, direction, widx, "start"), 0.0)
-        adj_e = solution.adjustments_r.get((pid, direction, widx, "end"), 0.0)
-        ws = (w.start_r + adj_s) * C + phi_s
-        we = (w.end_r + adj_e) * C + phi_s
+    for widx in range(plan.window_count(direction)):
+        ws_r = _window_endpoint_ratio(plan, direction, widx, "start",
+                                      solution.adjustments_r, pid)
+        we_r = _window_endpoint_ratio(plan, direction, widx, "end",
+                                      solution.adjustments_r, pid)
+        ws = ws_r * C + phi_s
+        we = we_r * C + phi_s
         if we <= ws:
             continue
         for n in range(n_min, n_max + 1):

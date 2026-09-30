@@ -126,9 +126,10 @@ class ModelMeta:
     # 单方案路口：不需要 0/1 方案选择变量，直接固定方案 id。
     fixed_plans: dict[str, str] = field(default_factory=dict)
     phi: dict[str, VarHandle] = field(default_factory=dict)
-    adj_vars: dict[tuple[str, Direction, int, Side], VarHandle] = field(default_factory=dict)
-    z_vars: dict[tuple[str, Direction, int, Side], VarHandle] = field(default_factory=dict)
-    plan_endpoint: dict[tuple[str, Direction, int, Side], LinearExpr] = field(default_factory=dict)
+    # v2: keyed by (plan_id, direction, boundary_index).
+    boundary_delta: dict[tuple[str, Direction, int], VarHandle] = field(default_factory=dict)
+    boundary_z: dict[tuple[str, Direction, int], VarHandle] = field(default_factory=dict)
+    plan_boundary: dict[tuple[str, Direction, int], LinearExpr] = field(default_factory=dict)
     effective: dict[tuple[str, Direction], EffectiveWindowSet] = field(default_factory=dict)
     red: dict[tuple[str, Direction], RedWindowSet] = field(default_factory=dict)
     green: dict[str, GreenDemandModel] = field(default_factory=dict)

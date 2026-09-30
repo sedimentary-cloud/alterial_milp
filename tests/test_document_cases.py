@@ -14,6 +14,10 @@ from greenwave.solve import make_backend
 from greenwave.solve.backend_base import SolveOptions
 from greenwave.report.solution import SolutionDecoder
 
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
+from _legacy_plan import convert_plan  # noqa: E402
+
 
 def _seg(from_, to, dist=500.0, v=11.1111111111, dist_up=None, dist_down=None):
     obj = {"from": from_, "to": to, "speed_up_mps": v, "speed_down_mps": v}
@@ -27,10 +31,11 @@ def _seg(from_, to, dist=500.0, v=11.1111111111, dist_up=None, dist_down=None):
 
 
 def _plan(iid, up, down, double=False, adjustable=None, hard=(), soft=()):
-    return {"id": f"{iid}_P1", "intersection": iid, "double_cycle": double,
-            "windows": {"up": up, "down": down},
-            "adjustable": adjustable or {"up": {}, "down": {}},
-            "hard_constraints": list(hard), "soft_constraints": list(soft)}
+    old = {"id": f"{iid}_P1", "intersection": iid, "double_cycle": double,
+           "windows": {"up": up, "down": down},
+           "adjustable": adjustable or {"up": {}, "down": {}},
+           "hard_constraints": list(hard), "soft_constraints": list(soft)}
+    return convert_plan(old)
 
 
 def _base_problem(cycle=90.0, plans=None, demands=None, margin=0.0,
@@ -158,9 +163,8 @@ class TestDocumentCases(unittest.TestCase):
 
     # constraint_templates: soft duration shortfall is penalized in seconds
     def test_constraint_template_soft_duration_loss(self):
-        d = _base_problem(margin=0.0)
-        for p in d["plans"]:
-            p["windows"] = {"up": [[0.0, 0.1]], "down": [[0.0, 0.1]]}
+        plans = [_plan(i, [[0.0, 0.1]], [[0.0, 0.1]]) for i in ("I1", "I2", "I3")]
+        d = _base_problem(plans=plans, margin=0.0)
         d["constraint_templates"] = [{
             "id": "all_green_loss_12s",
             "scope": {"kind": "all_plan_windows", "directions": ["up", "down"]},
@@ -286,21 +290,19 @@ class TestDocumentCases(unittest.TestCase):
         problem = ProblemInput.from_obj(d)
         ctx = FeasibilityFilter(problem).filter(90.0, 1.0)
         model = ModelBuilder(problem, ctx).build()
-        c11 = [r for r in model.cons.rows if r.meta.group == "C11"]
-        self.assertGreaterEqual(len(c11), 2)
+        # v2: the two half-cycle copies share one declared boundary delta.
+        self.assertEqual(sum(1 for v in model.vars if v.name.startswith("bd[I1_P1,up")), 1)
         backend = make_backend("scipy")
         session = backend.create(model)
         backend.set_objective(session, model.expr_composite(), "max")
         res = backend.solve(session, SolveOptions(30.0, 0.0))
         self.assertEqual(res.status.value, "optimal")
         sol = SolutionDecoder(model).decode(res.values)
-        adj = sol.adjustments_r
-        self.assertAlmostEqual(adj[("I1_P1", "up", 0, "start")],
-                               adj[("I1_P1", "up", 1, "start")], places=6)
-        self.assertAlmostEqual(adj[("I1_P1", "up", 0, "end")],
-                               adj[("I1_P1", "up", 1, "end")], places=6)
+        self.assertIn(("I1_P1", "up", 0), sol.adjustments_r)
 
 
+    @unittest.skipUnless(__import__("importlib").util.find_spec("highspy") is not None,
+                         "highspy not installed")
     def test_highspy_backend_smoke(self):
         d = _base_problem(cycle=90.0)
         d["solver"]["backend"] = "highspy"
@@ -475,11 +477,15 @@ class TestDocumentCases(unittest.TestCase):
             for j, node in enumerate(b.nodes):
                 slot = band.windows[node]
                 plan = problem.plan(sol.plan_selection[node])
-                w = plan.effective_windows(b.direction)[slot - 1]
-                adj_s = sol.adjustments_r.get((plan.id, b.direction, slot - 1, "start"), 0.0)
-                adj_e = sol.adjustments_r.get((plan.id, b.direction, slot - 1, "end"), 0.0)
-                ws = (w.start_r + adj_s) * 90.0 + sol.offsets_s[node]
-                we = (w.end_r + adj_e) * 90.0 + sol.offsets_s[node]
+                w = plan.window_edge_span(b.direction, slot - 1)
+                def _edge_r(edge, wrap):
+                    kind, src, offset = plan.expanded_edge_sources(b.direction)[edge]
+                    if kind == "const":
+                        return (0.0 if src == 0 else 1.0) + wrap
+                    return (plan.nominal_boundary_r(b.direction, src) + offset
+                            + sol.adjustments_r.get((plan.id, b.direction, src), 0.0)) + wrap
+                ws = _edge_r(w.start_edge, 0) * 90.0 + sol.offsets_s[node]
+                we = _edge_r(w.end_edge, w.wrap) * 90.0 + sol.offsets_s[node]
                 lo = band.start_s + table.cum_T_s[j]
                 hi = lo + band.width_s
                 n = round((lo - ws) / 90.0)

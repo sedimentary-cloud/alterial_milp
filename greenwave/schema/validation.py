@@ -58,13 +58,15 @@ def _validate_constraint_static(c: ConstraintSpec, *, is_global: bool,
                                       (c.id,)))
     for t in c.terms:
         a = t.atom
-        if is_global and a.kind in ("endpoint", "window_duration", "red_duration"):
+        if is_global and a.kind in ("boundary", "window_duration", "red_duration"):
             issues.append(ValidationIssue("error", "V7",
                                           f"global constraint {c.id!r} must not reference scoped atoms "
-                                          f"(endpoint/window_duration/red_duration)",
+                                          f"(boundary/window_duration/red_duration)",
                                           (c.id,)))
-        if a.kind == "endpoint" and a.intersection is None:
-            issues.append(ValidationIssue("error", "V7", f"endpoint atom in {c.id!r} missing intersection", (c.id,)))
+        if a.kind == "boundary" and a.intersection is None:
+            issues.append(ValidationIssue("error", "V7",
+                                          f"boundary atom in {c.id!r} missing intersection",
+                                          (c.id,)))
 
 
 def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
@@ -125,54 +127,90 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                                           f"plan {p.id!r} references unknown intersection {p.intersection!r}",
                                           (p.id, p.intersection)))
 
-    # V1/V2/V3：窗口比例、窗口顺序、可调范围。
+    # V1/V2/V3：边界、mask、派生窗口、min_phase。
     for p in problem.plans:
         for d in ("up", "down"):
-            originals = p.windows.get(d, ())
-            for wi, w in enumerate(originals):
-                if not (0.0 <= w.start_r < w.end_r <= 2.0):
-                    issues.append(ValidationIssue("error", "V1",
-                                                  f"plan {p.id!r} {d} window {wi} violates 0<=s<e<=2",
-                                                  (p.id, d, str(wi))))
-            # effective windows after double-cycle copying must be clean
-            eff = p.effective_windows(d)
-            for wi, w in enumerate(eff):
-                if not (0.0 <= w.start_r < w.end_r <= 2.0):
-                    issues.append(ValidationIssue("error", "V1",
-                                                  f"plan {p.id!r} effective {d} window {wi} violates 0<=s<e<=2",
-                                                  (p.id, d, str(wi))))
-            for a, b in zip(eff, eff[1:]):
-                if a.end_r > b.start_r + 1e-12:
-                    issues.append(ValidationIssue("error", "V2",
-                                                  f"plan {p.id!r} {d} effective windows overlap/out of order",
-                                                  (p.id, d)))
-            spec = p.adjustable.get(d, {})
-            for k, adj in spec.items():
-                if k < 0 or k >= len(originals):
-                    issues.append(ValidationIssue("error", "V3",
-                                                  f"plan {p.id!r} {d} adjusts unknown original window {k}",
-                                                  (p.id, d, str(k))))
-                    continue
-                for side_name, r in (("start", adj.start), ("end", adj.end)):
-                    if r is not None and not (r.lo_r <= 0.0 <= r.hi_r):
-                        issues.append(ValidationIssue("error", "V3",
-                                                      f"plan {p.id!r} {d} window {k} {side_name} range must satisfy lo<=0<=hi",
-                                                      (p.id, d, str(k), side_name)))
+            dp = p.direction_plan(d)
+            if dp.boundary_count > 6:
+                issues.append(ValidationIssue("error", "V1",
+                                              f"plan {p.id!r} {d} has more than 6 declared boundaries",
+                                              (p.id, d)))
+            pos = [b.pos_r for b in dp.boundaries]
+            lo, hi = (0.0, 0.5) if p.double_cycle else (0.0, 1.0)
+            for j, val in enumerate(pos):
+                if not (lo < val < hi):
+                    issues.append(ValidationIssue(
+                        "error", "V1",
+                        f"plan {p.id!r} {d} boundary {j} must be in ({lo}, {hi})",
+                        (p.id, d, str(j))))
+            for j in range(len(pos) - 1):
+                if pos[j] >= pos[j + 1] - 1e-12:
+                    issues.append(ValidationIssue(
+                        "error", "V1",
+                        f"plan {p.id!r} {d} boundaries {j}/{j+1} are not strictly increasing",
+                        (p.id, d, str(j))))
+            for j, b in enumerate(dp.boundaries):
+                if b.adjust is not None and not (b.lo_r <= 0.0 <= b.hi_r):
+                    issues.append(ValidationIssue(
+                        "error", "V3",
+                        f"plan {p.id!r} {d} boundary {j} adjust range must satisfy lo<=0<=hi",
+                        (p.id, d, str(j), "adjust")))
+            if len(dp.green_mask) != dp.boundary_count + 1:
+                issues.append(ValidationIssue(
+                    "error", "V2",
+                    f"plan {p.id!r} {d} green_mask length must equal boundary count + 1",
+                    (p.id, d)))
+                continue
+            n_true = sum(1 for x in dp.green_mask if x)
+            if n_true == 0:
+                issues.append(ValidationIssue(
+                    "error", "V2",
+                    f"plan {p.id!r} {d} green_mask must contain at least one green interval",
+                    (p.id, d)))
+            if n_true == len(dp.green_mask):
+                issues.append(ValidationIssue(
+                    "error", "V2",
+                    f"plan {p.id!r} {d} green_mask must contain at least one red interval",
+                    (p.id, d)))
+            if dp.green_mask and dp.green_mask[0] and dp.green_mask[-1]:
+                issues.append(ValidationIssue(
+                    "error", "V2",
+                    f"plan {p.id!r} {d} green_mask first and last intervals cannot both be green; "
+                    f"rotate the plan so a complete green interval lies inside one cycle",
+                    (p.id, d)))
+            k_max = 3 if not p.double_cycle else 6
+            try:
+                if p.window_count(d) > k_max:
+                    issues.append(ValidationIssue(
+                        "error", "V2",
+                        f"plan {p.id!r} {d} derives more than {k_max} green windows",
+                        (p.id, d)))
+            except ValueError as exc:
+                issues.append(ValidationIssue("error", "V2", str(exc), (p.id, d)))
+            if p.min_phase_s <= 0.0:
+                issues.append(ValidationIssue(
+                    "error", "V3",
+                    f"plan {p.id!r} min_phase_s must be > 0 (use a small numerical guard like 1e-3)",
+                    (p.id,)))
         for c in list(p.hard_constraints) + list(p.soft_constraints):
             _validate_constraint_static(c, is_global=False, owner_label=f"plan {p.id!r}", issues=issues)
             for t in c.terms:
                 a = t.atom
-                if a.kind == "endpoint":
+                if a.kind == "boundary":
                     if a.plan != p.id:
                         issues.append(ValidationIssue("error", "V6",
                                                       f"plan constraint {c.id!r} references another plan",
                                                       (c.id,)))
-                    elif a.direction is None or a.window is None or a.side is None:
-                        pass
-                    elif a.window < 0 or a.window >= p.window_count(a.direction):
+                    if a.direction not in ("up", "down"):
                         issues.append(ValidationIssue("error", "V6",
-                                                      f"plan constraint {c.id!r} references unknown effective window {a.window}",
+                                                      f"boundary atom in {c.id!r} missing direction",
                                                       (c.id,)))
+                    elif a.index is None or a.index < 0 or a.index >= p.boundary_count(a.direction):
+                        issues.append(ValidationIssue(
+                            "error", "V6",
+                            f"plan constraint {c.id!r} references unknown boundary "
+                            f"{a.direction}:{a.index}",
+                            (c.id,)))
                 if a.kind == "window_duration":
                     if a.plan is not None and a.plan != p.id:
                         issues.append(ValidationIssue("error", "V6",
@@ -183,14 +221,29 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                                                       f"window_duration atom in {c.id!r} must bind direction/window",
                                                       (c.id,)))
                     elif a.window < 0 or a.window >= p.window_count(a.direction):
-                        issues.append(ValidationIssue("error", "V6",
-                                                      f"plan constraint {c.id!r} references unknown effective window {a.window}",
-                                                      (c.id,)))
+                        issues.append(ValidationIssue(
+                            "error", "V6",
+                            f"plan constraint {c.id!r} references unknown derived window {a.window}",
+                            (c.id,)))
                 if a.kind == "red_duration":
-                    issues.append(ValidationIssue("error", "V6",
-                                                  f"plan constraint {c.id!r} must not reference red_duration; "
-                                                  f"use constraint_templates instead",
-                                                  (c.id,)))
+                    if a.plan is not None and a.plan != p.id:
+                        issues.append(ValidationIssue("error", "V6",
+                                                      f"plan constraint {c.id!r} references another plan",
+                                                      (c.id,)))
+                    if a.direction is None or a.window is None:
+                        issues.append(ValidationIssue("error", "V6",
+                                                      f"red_duration atom in {c.id!r} must bind direction/rid",
+                                                      (c.id,)))
+                    else:
+                        try:
+                            n_red = p.red_window_count(a.direction)
+                        except ValueError:
+                            n_red = 0
+                        if a.window < 1 or a.window > n_red:
+                            issues.append(ValidationIssue(
+                                "error", "V6",
+                                f"plan constraint {c.id!r} references unknown red rid {a.window}",
+                                (c.id,)))
                 if a.kind == "bandwidth":
                     issues.append(ValidationIssue("error", "V6",
                                                   f"plan constraint {c.id!r} must not reference bandwidth",
@@ -240,8 +293,11 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                 widths = []
                 for node in b.nodes:
                     for p in problem.plans_of(node):
-                        for w in p.effective_windows(b.direction):
-                            widths.append(w.width_r)
+                        try:
+                            for w in p.effective_windows(b.direction):
+                                widths.append(w.width_r)
+                        except ValueError:
+                            continue
                 if widths and margin.delta_min_s >= min(widths):
                     issues.append(ValidationIssue("warning", "V10",
                                                   f"demand {b.id!r} delta_min_s >= min window width; margin target may be unreachable",

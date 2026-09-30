@@ -1,28 +1,29 @@
-"""纯函数红窗枚举：语义层和建模层共用同一份红窗编号契约。
+"""纯函数红窗枚举：语义层和建模层共用的 plan-native 红窗编号契约。
 
-给定一个已按 start_r 排序、包含双周期副本的有效窗口序列，
-红窗补集的编号规则与 RedWindowBuilder 保持一致：
-
-- 先 gap：槽位 r 结束 -> 槽位 r+1 开始，rid = 1..k-1；
-- 再 wrap：槽位 r 结束 -> 槽位 1 开始 + 1.0 周期，rid = k..2k-1。
-
-这样用户说的“第几段红灯”在编译期和建模期是同一个对象。
+v2 约定：
+- 绿窗不跨周期边界，按 start_r 排序编号 1..K；
+- 红窗 = 极大连续非绿区间，也编号 1..K：
+  - rid = i (1..K-1)：绿窗 i 与绿窗 i+1 之间的 gap；
+  - rid = K       ：绿窗 K 之后、绿窗 1 之前的循环红区间（可能跨 0/C）；
+- 跨 0/C 的红区间用 wrap=1 表示，不拆分 ID；
+- after_green = k 直接对应 rid = k。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable
 
-from ..schema.models import WindowSpec
+from ..schema.models import DerivedInterval
 
 
 @dataclass(frozen=True)
 class RedInterval:
     rid: int
     kind: str                 # "gap" | "wrap"
-    after_slot: int           # 1-based green slot this red interval follows
-    nominal_start_r: float
-    nominal_end_r: float
+    after_slot: int           # 1-based green window this red interval follows
+    start_r: float
+    end_r: float
+    wrap: int                 # 0/1; 1 means end_r is already expanded (may be > 1)
     nominal_width_r: float
 
     @property
@@ -30,31 +31,36 @@ class RedInterval:
         return self.nominal_width_r <= 1e-9
 
 
-def enumerate_red_intervals(windows: Iterable[WindowSpec]) -> tuple[RedInterval, ...]:
-    """Return red intervals in the canonical gap-then-wrap order."""
-    wins = tuple(windows)
-    k = len(wins)
-    if k <= 0:
+def enumerate_red_intervals(green_windows: Iterable[DerivedInterval]) -> tuple[RedInterval, ...]:
+    """Return plan-native red intervals for ordered, non-wrapping green windows."""
+    green = tuple(green_windows)
+    if not green:
         return ()
     out: list[RedInterval] = []
-    rid = 0
-    # gap after each green slot r = 1..k-1
-    for r in range(1, k):
-        rid += 1
-        start = wins[r - 1].end_r
-        end = wins[r].start_r
-        out.append(RedInterval(rid, "gap", r, start, end, end - start))
-    # wrap after each green slot r = 1..k
-    for r in range(1, k + 1):
-        rid += 1
-        start = wins[r - 1].end_r
-        end = wins[0].start_r + 1.0
-        out.append(RedInterval(rid, "wrap", r, start, end, end - start))
+    K = len(green)
+    for i in range(K):
+        if i < K - 1:
+            start_r = green[i].end_r
+            end_r = green[i + 1].start_r
+            wrap = 0
+            kind = "gap"
+            after = i + 1
+        else:
+            start_r = green[-1].end_r
+            end_r = green[0].start_r + 1.0
+            wrap = 1
+            kind = "wrap"
+            after = K
+        out.append(RedInterval(
+            rid=i + 1, kind=kind, after_slot=after,
+            start_r=start_r, end_r=end_r, wrap=wrap,
+            nominal_width_r=end_r - start_r,
+        ))
     return tuple(out)
 
 
-def nominal_red_width_r(windows: Iterable[WindowSpec], rid: int) -> float:
-    for item in enumerate_red_intervals(windows):
+def nominal_red_width_r(green_windows: Iterable[DerivedInterval], rid: int) -> float:
+    for item in enumerate_red_intervals(green_windows):
         if item.rid == rid:
             return item.nominal_width_r
     return 0.0

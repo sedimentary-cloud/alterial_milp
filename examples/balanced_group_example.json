@@ -28,23 +28,30 @@
       "id": "I1_P1",
       "intersection": "I1",
       "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.45
+      "min_phase_s": 0.001,
+      "directions": {
+        "up": {
+          "boundaries": [
+            {
+              "pos_r": 0.45
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.2
+        },
+        "down": {
+          "boundaries": [
+            {
+              "pos_r": 0.2
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ]
-      },
-      "adjustable": {
-        "up": {},
-        "down": {}
+        }
       },
       "hard_constraints": [],
       "soft_constraints": []
@@ -53,23 +60,30 @@
       "id": "I2_P1",
       "intersection": "I2",
       "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.45
+      "min_phase_s": 0.001,
+      "directions": {
+        "up": {
+          "boundaries": [
+            {
+              "pos_r": 0.45
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.2
+        },
+        "down": {
+          "boundaries": [
+            {
+              "pos_r": 0.2
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ]
-      },
-      "adjustable": {
-        "up": {},
-        "down": {}
+        }
       },
       "hard_constraints": [],
       "soft_constraints": []
@@ -78,23 +92,30 @@
       "id": "I3_P1",
       "intersection": "I3",
       "double_cycle": false,
-      "windows": {
-        "up": [
-          [
-            0.0,
-            0.45
+      "min_phase_s": 0.001,
+      "directions": {
+        "up": {
+          "boundaries": [
+            {
+              "pos_r": 0.45
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ],
-        "down": [
-          [
-            0.0,
-            0.2
+        },
+        "down": {
+          "boundaries": [
+            {
+              "pos_r": 0.2
+            }
+          ],
+          "green_mask": [
+            true,
+            false
           ]
-        ]
-      },
-      "adjustable": {
-        "up": {},
-        "down": {}
+        }
       },
       "hard_constraints": [],
       "soft_constraints": []

@@ -41,12 +41,14 @@ class ViolationRecord:
 class SolutionRecord:
     plan_selection: Mapping[str, str]
     offsets_s: Mapping[str, float]
-    adjustments_r: Mapping[tuple[str, str, int, str], float]
+    adjustments_r: Mapping[tuple[str, str, int], float]
     bands: tuple[ConstructedBand, ...]
     violations: tuple[ViolationRecord, ...]
     composite_s: float
     loss_s: float
     balanced_groups: Mapping[str, float] = field(default_factory=dict)
+    boundaries_r: Mapping[tuple[str, str, int], float] = field(default_factory=dict)
+    derived_windows: Mapping[tuple[str, str], tuple[tuple[float, float], ...]] = field(default_factory=dict)
     # 下面三个字段用于格点热力图：
     # band_reward_s：Σ weight_b · Β_b，只含正带宽收益；
     # margin_loss_s：绿波 margin 短缺罚的正值；
@@ -89,15 +91,32 @@ class SolutionDecoder:
         offsets = {iid: float(values[meta.phi[iid].index]) for iid in meta.problem.corridor.intersections}
 
         # adjustments on selected plans
-        adjustments: dict[tuple[str, str, int, str], float] = {}
+        adjustments: dict[tuple[str, str, int], float] = {}
         for iid, pid in selection.items():
             plan = meta.problem.plan(pid)
             for d in ("up", "down"):
-                for k in range(plan.window_count(d)):
-                    for side in ("start", "end"):
-                        h = meta.adj_vars.get((pid, d, k, side))
-                        if h is not None:
-                            adjustments[(pid, d, k, side)] = float(values[h.index])
+                for j in range(plan.boundary_count(d)):
+                    h = meta.boundary_delta.get((pid, d, j))
+                    if h is not None:
+                        adjustments[(pid, d, j)] = float(values[h.index])
+
+        # boundary values and derived windows for the selected plans
+        boundaries_r: dict[tuple[str, str, int], float] = {}
+        derived_windows: dict[tuple[str, str], tuple[tuple[float, float], ...]] = {}
+        for iid, pid in selection.items():
+            plan = meta.problem.plan(pid)
+            for d in ("up", "down"):
+                for j in range(plan.boundary_count(d)):
+                    h = meta.boundary_delta.get((pid, d, j))
+                    delta = 0.0 if h is None else float(values[h.index])
+                    boundaries_r[(pid, d, j)] = plan.nominal_boundary_r(d, j) + delta
+                b_r = {j: boundaries_r[(pid, d, j)]
+                       for j in range(plan.boundary_count(d))}
+                try:
+                    wins = plan.derived_windows_from_boundary_r(d, b_r)
+                except ValueError:
+                    wins = ()
+                derived_windows[(pid, d)] = tuple((w.start_r, w.end_r) for w in wins)
 
         bands: list[ConstructedBand] = []
         # 第二步：读出每条绿带和红带。
@@ -219,7 +238,8 @@ class SolutionDecoder:
         composite = reward - margin_pen - composite_soft + balanced_reward - red_boundary_pen
         return SolutionRecord(dict(selection), offsets, adjustments, tuple(bands),
                               tuple(violations), float(composite), float(loss),
-                              balanced_values, float(reward), float(margin_pen))
+                              balanced_values, boundaries_r, derived_windows,
+                              float(reward), float(margin_pen))
 
     # ------------------------------------------------------------------
     def _actual_margin_penalty(self, values: np.ndarray, bands) -> float:
@@ -240,8 +260,8 @@ class SolutionDecoder:
                     continue
                 ew = meta.effective[(node, b.direction)]
                 phi = float(values[meta.phi[node].index])
-                s = phi + float(values[ew.s[k].index])
-                e = phi + float(values[ew.e[k].index])
+                s = phi + ew.s[k].evaluate(values)
+                e = phi + ew.e[k].evaluate(values)
                 band_lo = band.start_s + table.cum_T_s[j]
                 band_hi = band_lo + band.width_s
                 n = round((band_lo - s) / self.model.meta.cycle_s)
@@ -316,7 +336,11 @@ class ReportBuilder:
         return {
             "plan_selection": dict(sol.plan_selection),
             "offsets_s": {k: float(v) for k, v in sol.offsets_s.items()},
-            "adjustments": {f"{p}.{d}.{k}.{s}": float(v) for (p, d, k, s), v in sol.adjustments_r.items()},
+            "adjustments": {f"{p}.{d}.{j}": float(v) for (p, d, j), v in sol.adjustments_r.items()},
+            "boundaries": {f"{p}.{d}.{j}": float(v)
+                           for (p, d, j), v in sol.boundaries_r.items()},
+            "derived_windows": {f"{p}.{d}": [list(x) for x in wins]
+                                for (p, d), wins in sol.derived_windows.items()},
             "bands": [{
                 "demand": b.demand,
                 "slot": b.slot,

@@ -28,7 +28,7 @@ from ..errors import ValidationIssue
 
 Direction = Literal["up", "down"]
 Side = Literal["start", "end"]
-AtomKind = Literal["offset", "endpoint", "window_duration", "red_duration", "bandwidth", "const"]
+AtomKind = Literal["offset", "boundary", "window_duration", "red_duration", "bandwidth", "const"]
 Unit = Literal["s", "ratio"]
 Owner = Literal["composite", "intersection_loss"]
 ConstraintScopeKind = Literal["all_plan_windows", "all_plan_red_windows", "specific_plan_windows", "all_plans", "all_windows_of_plan"]
@@ -58,80 +58,118 @@ def _check_side(value: Any) -> Side:
 
 
 # ---------------------------------------------------------------------------
-# Plan / window schema
+# Plan / boundary schema (v2)
 # ---------------------------------------------------------------------------
 
-# 一个绿灯窗口：只能用“周期比例”描述，不能用绝对秒。
-# 例如 start_r=0.1, end_r=0.3 表示从周期的 10% 到 30% 是绿灯。
+# 一个相位边界：周期比例位置 + 可选的可调范围（比例偏移）。
 @dataclass(frozen=True)
-class WindowSpec:
+class BoundarySpec:
+    pos_r: float
+    adjust: tuple[float, float] | None = None
+
+    def __post_init__(self) -> None:
+        if self.adjust is not None:
+            lo, hi = self.adjust
+            if lo > 0.0 or hi < 0.0:
+                raise ValueError("boundary adjust range must satisfy lo <= 0 <= hi")
+
+    @property
+    def lo_r(self) -> float:
+        return 0.0 if self.adjust is None else float(self.adjust[0])
+
+    @property
+    def hi_r(self) -> float:
+        return 0.0 if self.adjust is None else float(self.adjust[1])
+
+    @property
+    def adjustable(self) -> bool:
+        return self.adjust is not None
+
+    @classmethod
+    def from_obj(cls, obj: Any) -> "BoundarySpec":
+        if isinstance(obj, BoundarySpec):
+            return obj
+        if isinstance(obj, (int, float)):
+            return cls(float(obj))
+        if not isinstance(obj, Mapping):
+            raise ValueError(f"boundary must be a number or object, got {obj!r}")
+        pos = obj.get("pos_r", obj.get("pos"))
+        if pos is None:
+            raise ValueError("boundary object requires pos_r")
+        adj = obj.get("adjust")
+        if adj is None:
+            return cls(_num(pos, "pos_r"))
+        if not isinstance(adj, (list, tuple)) or len(adj) != 2:
+            raise ValueError("boundary adjust must be a two-element [lo, hi] range")
+        return cls(_num(pos, "pos_r"), (_num(adj[0], "adjust.lo"), _num(adj[1], "adjust.hi")))
+
+
+# 一个方向声明：有序相位边界 + 每段是否为绿灯。
+@dataclass(frozen=True)
+class DirectionPlan:
+    boundaries: tuple[BoundarySpec, ...] = ()
+    green_mask: tuple[bool, ...] = (False,)
+
+    def __post_init__(self) -> None:
+        pos = [b.pos_r for b in self.boundaries]
+        if any(not (0.0 < p < 1.0) for p in pos):
+            raise ValueError("boundary positions must be in (0, 1)")
+        for a, b in zip(pos, pos[1:]):
+            if a >= b:
+                raise ValueError("boundary positions must be strictly increasing")
+        if len(self.green_mask) != len(self.boundaries) + 1:
+            raise ValueError("green_mask length must equal boundary count + 1")
+
+    @property
+    def boundary_count(self) -> int:
+        return len(self.boundaries)
+
+    @classmethod
+    def from_obj(cls, obj: Any) -> "DirectionPlan":
+        if isinstance(obj, DirectionPlan):
+            return obj
+        if obj is None:
+            return cls()
+        if not isinstance(obj, Mapping):
+            raise ValueError(f"direction plan must be an object, got {obj!r}")
+        raw_bounds = obj.get("boundaries", ())
+        boundaries = tuple(BoundarySpec.from_obj(b) for b in raw_bounds)
+        raw_mask = obj.get("green_mask", obj.get("mask"))
+        if raw_mask is None:
+            raise ValueError("direction plan requires green_mask")
+        green_mask = tuple(bool(x) for x in raw_mask)
+        return cls(boundaries, green_mask)
+
+
+# 派生后的一个区间（绿窗 / 红窗）。边下标是“扩展 edge”下标。
+@dataclass(frozen=True)
+class DerivedInterval:
+    rid: int
+    kind: str                 # "green" | "gap" | "wrap"
+    start_edge: int
+    end_edge: int
+    wrap: int
     start_r: float
     end_r: float
+    after_green: int = 0
 
     @property
     def width_r(self) -> float:
         return self.end_r - self.start_r
 
-    @classmethod
-    def from_obj(cls, obj: Any) -> "WindowSpec":
-        if isinstance(obj, WindowSpec):
-            return obj
-        if isinstance(obj, Mapping):
-            return cls(_num(obj["start_r"], "start_r"), _num(obj["end_r"], "end_r"))
-        if isinstance(obj, (list, tuple)) and len(obj) == 2:
-            return cls(_num(obj[0], "start_r"), _num(obj[1], "end_r"))
-        raise ValueError(f"cannot parse window spec from {obj!r}")
+
+# 兼容旧名字：消费者只需要 .start_r / .end_r / .width_r。
+WindowSpec = DerivedInterval
 
 
-# 窗口端点允许微调的范围，单位仍是周期比例。
-# 必须满足 lo_r <= 0 <= hi_r，也就是名义值必须在允许范围内。
-@dataclass(frozen=True)
-class EndpointRange:
-    lo_r: float
-    hi_r: float
-
-    @classmethod
-    def from_obj(cls, obj: Any) -> "EndpointRange":
-        if isinstance(obj, EndpointRange):
-            return obj
-        if isinstance(obj, Mapping):
-            return cls(_num(obj["lo_r"], "lo_r"), _num(obj["hi_r"], "hi_r"))
-        if isinstance(obj, (list, tuple)) and len(obj) == 2:
-            return cls(_num(obj[0], "lo_r"), _num(obj[1], "hi_r"))
-        raise ValueError(f"cannot parse endpoint range from {obj!r}")
-
-
-# 一个窗口的 start / end 两端分别允许怎么微调。
-# 没写的那一端就是固定值，不能动。
-@dataclass(frozen=True)
-class WindowAdjustSpec:
-    start: EndpointRange | None = None
-    end: EndpointRange | None = None
-
-    @classmethod
-    def from_obj(cls, obj: Any) -> "WindowAdjustSpec":
-        if isinstance(obj, WindowAdjustSpec):
-            return obj
-        if obj is None:
-            return cls()
-        if not isinstance(obj, Mapping):
-            raise ValueError(f"window adjust spec must be an object, got {obj!r}")
-        return cls(
-            start=EndpointRange.from_obj(obj["start"]) if obj.get("start") is not None else None,
-            end=EndpointRange.from_obj(obj["end"]) if obj.get("end") is not None else None,
-        )
-
-
-# 约束表达式里的一个“原子”引用。
-# 例如：某个路口的偏置 φ、某个窗口端点的秒值、某条带的总带宽、一个常数。
 @dataclass(frozen=True)
 class AtomRef:
     kind: AtomKind
     intersection: str | None = None
     plan: str | None = None
     direction: Direction | None = None
-    window: int | None = None
-    side: Side | None = None
+    index: int | None = None          # boundary index (0-based)
+    window: int | None = None         # derived window index / red rid
     demand: str | None = None
     const: float | None = None
 
@@ -139,24 +177,23 @@ class AtomRef:
         if self.kind == "offset":
             if self.intersection is None:
                 raise ValueError("offset atom requires intersection")
-        elif self.kind == "endpoint":
+        elif self.kind == "boundary":
             missing = [n for n, v in (
                 ("intersection", self.intersection), ("plan", self.plan),
-                ("direction", self.direction), ("window", self.window),
-                ("side", self.side)) if v is None]
+                ("direction", self.direction), ("index", self.index)) if v is None]
             if missing:
-                raise ValueError(f"endpoint atom missing fields: {missing}")
+                raise ValueError(f"boundary atom missing fields: {missing}")
             if self.direction not in ("up", "down"):
-                raise ValueError("endpoint atom direction must be up/down")
-            if self.side not in ("start", "end"):
-                raise ValueError("endpoint atom side must be start/end")
+                raise ValueError("boundary atom direction must be up/down")
+            if self.index < 0:
+                raise ValueError("boundary atom index must be >= 0")
         elif self.kind in ("window_duration", "red_duration"):
-            # 可以写成具体 plan/direction/window，也可以留空由 ConstraintTemplate
-            # 的 scope 在建模时填充；side 对时长原子没有意义。
-            # window_duration 的 window 是绿灯窗口有效索引；
-            # red_duration 的 window 是红窗补集区间索引。
-            if self.side is not None:
-                raise ValueError(f"{self.kind} atom must not specify side")
+            if self.direction is not None:
+                _check_direction(self.direction)
+            if self.kind == "window_duration" and self.window is not None and self.window < 0:
+                raise ValueError("window_duration atom window index must be >= 0")
+            if self.kind == "red_duration" and self.window is not None and self.window < 1:
+                raise ValueError("red_duration atom rid must be >= 1")
         elif self.kind == "bandwidth":
             if self.demand is None:
                 raise ValueError("bandwidth atom requires demand")
@@ -177,8 +214,8 @@ class AtomRef:
             intersection=obj.get("intersection"),
             plan=obj.get("plan"),
             direction=_check_direction(obj["direction"]) if obj.get("direction") is not None else None,
+            index=int(obj["index"]) if obj.get("index") is not None else None,
             window=int(obj["window"]) if obj.get("window") is not None else None,
-            side=_check_side(obj["side"]) if obj.get("side") is not None else None,
             demand=obj.get("demand"),
             const=_num(obj["const"], "const") if obj.get("const") is not None else None,
         )
@@ -399,61 +436,188 @@ class ConstraintTemplate:
 # Plan
 # ---------------------------------------------------------------------------
 
-# 一个信号控制候选方案。
-# 干线优化只关心“每个方向有哪些绿灯窗口”，不关心内部相位怎么排。
+# 一个信号控制候选方案（v2：相位边界建模）。
+# 干线只感受每个方向由边界和 green_mask 派生出的绿灯窗口；
+# 边界本身是一等变量，可以被任意约束引用。
 @dataclass(frozen=True)
 class PlanSpec:
     id: str
     intersection: str
-    windows: Mapping[Direction, tuple[WindowSpec, ...]]
+    directions: Mapping[Direction, DirectionPlan]
     double_cycle: bool = False
-    adjustable: Mapping[Direction, Mapping[int, WindowAdjustSpec]] = field(default_factory=dict)
+    min_phase_s: float = 1e-3
     hard_constraints: tuple[ConstraintSpec, ...] = ()
     soft_constraints: tuple[ConstraintSpec, ...] = ()
 
-    # -- effective window access -------------------------------------------------
-    def _original_windows(self, d: Direction) -> tuple[WindowSpec, ...]:
-        return tuple(self.windows.get(d, ()))
+    def __post_init__(self) -> None:
+        if self.min_phase_s < 0.0:
+            raise ValueError("min_phase_s must be >= 0")
+        for d in ("up", "down"):
+            dp = self.directions.get(d)
+            if dp is None:
+                continue
+            if self.double_cycle:
+                for b in dp.boundaries:
+                    if not (0.0 < b.pos_r < 0.5):
+                        raise ValueError(
+                            f"plan {self.id!r} double_cycle {d} boundaries must be in (0, 0.5)")
+            else:
+                for b in dp.boundaries:
+                    if not (0.0 < b.pos_r < 1.0):
+                        raise ValueError(
+                            f"plan {self.id!r} {d} boundaries must be in (0, 1)")
 
-    def _effective_entries(self, d: Direction) -> tuple[tuple[WindowSpec, int, bool], ...]:
-        """Return ``(window, original_index, is_copy)`` sorted by start ratio."""
-        originals = self._original_windows(d)
-        entries: list[tuple[WindowSpec, int, bool]] = [(w, i, False) for i, w in enumerate(originals)]
-        if self.double_cycle:
-            for i, w in enumerate(originals):
-                entries.append((WindowSpec(w.start_r + 0.5, w.end_r + 0.5), i, True))
-        entries.sort(key=lambda e: (e[0].start_r, e[0].end_r, e[1], e[2]))
-        return tuple(entries)
+    # -- declared access ------------------------------------------------------
+    def direction_plan(self, d: Direction) -> DirectionPlan:
+        return self.directions.get(d, DirectionPlan((), (False,)))
 
-    def effective_windows(self, d: Direction) -> tuple[WindowSpec, ...]:
-        return tuple(e[0] for e in self._effective_entries(d))
+    def boundary_count(self, d: Direction) -> int:
+        return self.direction_plan(d).boundary_count
 
-    def effective_original_index(self, d: Direction, k: int) -> int:
-        return self._effective_entries(d)[k][1]
+    def nominal_boundary_r(self, d: Direction, j: int) -> float:
+        return self.direction_plan(d).boundaries[j].pos_r
 
-    def effective_is_copy(self, d: Direction, k: int) -> bool:
-        return self._effective_entries(d)[k][2]
+    def boundary_is_adjustable(self, d: Direction, j: int) -> bool:
+        return self.direction_plan(d).boundaries[j].adjustable
+
+    def boundary_adjust_range(self, d: Direction, j: int):
+        b = self.direction_plan(d).boundaries[j]
+        return None if b.adjust is None else (b.lo_r, b.hi_r)
+
+    # -- expanded edges (double-cycle aware) ----------------------------------
+    def _expanded_boundary_specs(self, d: Direction):
+        """Interior expanded boundaries as (nominal_r, source_kind, source_idx, offset)."""
+        dp = self.direction_plan(d)
+        if not self.double_cycle:
+            return tuple((b.pos_r, "boundary", j, 0.0) for j, b in enumerate(dp.boundaries))
+        specs = [(b.pos_r, "boundary", j, 0.0) for j, b in enumerate(dp.boundaries)]
+        specs.append((0.5, "const", -1, 0.5))
+        specs.extend((b.pos_r + 0.5, "boundary", j, 0.5) for j, b in enumerate(dp.boundaries))
+        specs.sort(key=lambda x: x[0])
+        return tuple(specs)
+
+    def expanded_edge_ratios(self, d: Direction) -> tuple[float, ...]:
+        specs = self._expanded_boundary_specs(d)
+        return (0.0,) + tuple(s[0] for s in specs) + (1.0,)
+
+    def expanded_edge_sources(self, d: Direction) -> tuple[tuple[str, int, float], ...]:
+        specs = self._expanded_boundary_specs(d)
+        return (("const", 0, 0.0),) + tuple((s[1], s[2], s[3]) for s in specs) + (("const", 1, 1.0),)
+
+    def expanded_mask(self, d: Direction) -> tuple[bool, ...]:
+        mask = self.direction_plan(d).green_mask
+        if not self.double_cycle:
+            return mask
+        return mask + mask
+
+    # -- derived green windows ------------------------------------------------
+    @staticmethod
+    def _windows_from_ratios(ratios, mask, plan_id: str, d: Direction):
+        if mask and mask[0] and mask[-1]:
+            raise ValueError(
+                f"plan {plan_id!r} {d} green_mask first and last intervals are both green; "
+                f"rotate the plan so the complete green interval lies inside one cycle")
+        out: list[DerivedInterval] = []
+        i = 0
+        n = len(mask)
+        while i < n:
+            if not mask[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < n and mask[j + 1]:
+                j += 1
+            out.append(DerivedInterval(
+                rid=len(out) + 1, kind="green",
+                start_edge=i, end_edge=j + 1, wrap=0,
+                start_r=ratios[i], end_r=ratios[j + 1],
+            ))
+            i = j + 1
+        return tuple(out)
+
+    def derived_windows(self, d: Direction) -> tuple[DerivedInterval, ...]:
+        return self._windows_from_ratios(self.expanded_edge_ratios(d),
+                                         self.expanded_mask(d), self.id, d)
+
+    def derived_windows_from_boundary_r(self, d: Direction,
+                                        boundary_r: Mapping[int, float]):
+        """Derived windows using adjusted boundary values (or nominal if absent)."""
+        ratios = []
+        for edge in range(len(self.expanded_edge_sources(d))):
+            kind, src, offset = self.expanded_edge_sources(d)[edge]
+            if kind == "const":
+                ratios.append(float(offset))
+            else:
+                ratios.append(float(boundary_r.get(src, self.nominal_boundary_r(d, src)))
+                              + offset)
+        return self._windows_from_ratios(tuple(ratios), self.expanded_mask(d), self.id, d)
+
+    # 兼容旧调用名：主读者仍然使用 effective_windows。
+    def effective_windows(self, d: Direction) -> tuple[DerivedInterval, ...]:
+        return self.derived_windows(d)
 
     def window_count(self, d: Direction) -> int:
-        return len(self._effective_entries(d))
+        return len(self.derived_windows(d))
 
-    def nominal_endpoint_r(self, d: Direction, k: int, side: Side) -> float:
-        w = self._effective_entries(d)[k][0]
+    def window_edge_span(self, d: Direction, k: int) -> DerivedInterval:
+        return self.derived_windows(d)[k]
+
+    def is_copy_window(self, d: Direction, k: int) -> bool:
+        """For double-cycle plans, second-half derived windows are copies."""
+        if not self.double_cycle:
+            return False
+        return self.window_edge_span(d, k).start_r >= 0.5 - 1e-12
+
+    def nominal_window_endpoint_r(self, d: Direction, k: int, side: Side) -> float:
+        w = self.window_edge_span(d, k)
         return w.start_r if side == "start" else w.end_r
 
-    def adjust_range(self, d: Direction, k: int, side: Side) -> EndpointRange | None:
-        orig = self.effective_original_index(d, k)
-        spec = self.adjustable.get(d, {}).get(orig)
-        if spec is None:
-            return None
-        return spec.start if side == "start" else spec.end
+    # -- derived red intervals -------------------------------------------------
+    def derived_red_intervals(self, d: Direction) -> tuple[DerivedInterval, ...]:
+        green = self.derived_windows(d)
+        if not green:
+            return ()
+        ratios = self.expanded_edge_ratios(d)
+        out: list[DerivedInterval] = []
+        K = len(green)
+        for i in range(K):
+            if i < K - 1:
+                start_edge = green[i].end_edge
+                end_edge = green[i + 1].start_edge
+                wrap = 0
+                kind = "gap"
+                after = i + 1
+            else:
+                start_edge = green[-1].end_edge
+                end_edge = green[0].start_edge
+                wrap = 1
+                kind = "wrap"
+                after = K
+            out.append(DerivedInterval(
+                rid=i + 1, kind=kind,
+                start_edge=start_edge, end_edge=end_edge, wrap=wrap,
+                start_r=ratios[start_edge], end_r=ratios[end_edge] + wrap,
+                after_green=after,
+            ))
+        return tuple(out)
 
-    def endpoint_is_adjustable(self, d: Direction, k: int, side: Side) -> bool:
-        return self.adjust_range(d, k, side) is not None
+    def red_window_count(self, d: Direction) -> int:
+        return len(self.derived_red_intervals(d))
 
-    def endpoint_original_key(self, d: Direction, k: int, side: Side) -> tuple[int, Side]:
-        """Key identifying the *declared* adjustable endpoint for double-cycle copies."""
-        return (self.effective_original_index(d, k), side)
+    def window_endpoint_bound_r(self, d: Direction, k: int, side: Side):
+        """Nominal endpoint bounds (ratio) including adjustable ranges and wrap."""
+        w = self.window_edge_span(d, k)
+        edge = w.start_edge if side == "start" else w.end_edge
+        sources = self.expanded_edge_sources(d)
+        kind, src, offset = sources[edge]
+        wrap = 0 if side == "start" else w.wrap
+        if kind == "const":
+            val = float(offset)
+            return val + wrap, val + wrap
+        b = self.direction_plan(d).boundaries[src]
+        lo = b.pos_r + offset + (b.lo_r if b.adjust is not None else 0.0) + wrap
+        hi = b.pos_r + offset + (b.hi_r if b.adjust is not None else 0.0) + wrap
+        return lo, hi
 
     @classmethod
     def from_obj(cls, obj: Any) -> "PlanSpec":
@@ -461,21 +625,20 @@ class PlanSpec:
             return obj
         if not isinstance(obj, Mapping):
             raise ValueError(f"plan must be an object, got {obj!r}")
-        windows_in = obj.get("windows", {})
-        windows: dict[Direction, tuple[WindowSpec, ...]] = {}
+        if "windows" in obj and "directions" not in obj:
+            raise ValueError(
+                "v2 schema no longer accepts 'windows'; use directions[d].boundaries + green_mask")
+        directions_in = obj.get("directions", {}) or {}
+        directions: dict[Direction, DirectionPlan] = {}
         for d in ("up", "down"):
-            windows[d] = tuple(WindowSpec.from_obj(w) for w in windows_in.get(d, ()))
-        adjustable_in = obj.get("adjustable", {}) or {}
-        adjustable: dict[Direction, dict[int, WindowAdjustSpec]] = {}
-        for d in ("up", "down"):
-            per = adjustable_in.get(d, {}) or {}
-            adjustable[d] = {int(k): WindowAdjustSpec.from_obj(v) for k, v in per.items()}
+            if d in directions_in:
+                directions[d] = DirectionPlan.from_obj(directions_in[d])
         return cls(
             id=str(obj["id"]),
             intersection=str(obj["intersection"]),
-            windows=windows,
+            directions=directions,
             double_cycle=bool(obj.get("double_cycle", False)),
-            adjustable=adjustable,
+            min_phase_s=_num(obj.get("min_phase_s", 1e-3), "min_phase_s"),
             hard_constraints=tuple(ConstraintSpec.from_obj(c) for c in obj.get("hard_constraints", ())),
             soft_constraints=tuple(ConstraintSpec.from_obj(c) for c in obj.get("soft_constraints", ())),
         )
@@ -918,9 +1081,6 @@ class ProblemInput:
 def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
     # Minimal dump used by multiprocessing payloads.  It deliberately emits
     # the same keys accepted by ``from_obj``.
-    def win(w: WindowSpec) -> list[float]:
-        return [w.start_r, w.end_r]
-
     def cmap(c: ConstraintSpec | ConstraintTemplate) -> dict[str, Any]:
         out = {
             "id": c.id,
@@ -929,8 +1089,8 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
                 "intersection": t.atom.intersection,
                 "plan": t.atom.plan,
                 "direction": t.atom.direction,
+                "index": t.atom.index,
                 "window": t.atom.window,
-                "side": t.atom.side,
                 "demand": t.atom.demand,
                 "const": t.atom.const,
             }]],
@@ -963,11 +1123,18 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
         },
         "plans": [{
             "id": p.id, "intersection": p.intersection, "double_cycle": p.double_cycle,
-            "windows": {d: [win(w) for w in p.windows.get(d, ())] for d in ("up", "down")},
-            "adjustable": {d: {str(k): {"start": None if v.start is None else [v.start.lo_r, v.start.hi_r],
-                                         "end": None if v.end is None else [v.end.lo_r, v.end.hi_r]}
-                                for k, v in (p.adjustable.get(d) or {}).items()}
-                           for d in ("up", "down")},
+            "min_phase_s": p.min_phase_s,
+            "directions": {
+                d: {
+                    "boundaries": [
+                        {"pos_r": b.pos_r,
+                         "adjust": None if b.adjust is None else [b.lo_r, b.hi_r]}
+                        for b in p.direction_plan(d).boundaries
+                    ],
+                    "green_mask": list(p.direction_plan(d).green_mask),
+                }
+                for d in ("up", "down")
+            },
             "hard_constraints": [cmap(c) for c in p.hard_constraints],
             "soft_constraints": [cmap(c) for c in p.soft_constraints],
         } for p in self.plans],
@@ -1042,8 +1209,8 @@ ProblemInput.model_dump = _problem_model_dump  # type: ignore[assignment]
 
 
 __all__ = [
-    "Direction", "Side", "Unit", "WindowSpec", "EndpointRange", "WindowAdjustSpec",
-    "AtomRef", "LinearTerm", "SoftPenalty", "ConstraintSpec",
+    "Direction", "Side", "Unit", "BoundarySpec", "DirectionPlan", "DerivedInterval",
+    "WindowSpec", "AtomRef", "LinearTerm", "SoftPenalty", "ConstraintSpec",
     "ConstraintScope", "ConstraintTemplate", "PlanSpec",
     "SegmentSpec", "CorridorSpec", "MarginSpec", "RedEdgeSpec", "RedBoundarySpec",
     "BandDemandSpec",

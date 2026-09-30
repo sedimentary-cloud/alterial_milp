@@ -34,11 +34,28 @@ def _seg(from_: str, to: str, dist: float = 500.0, v: float = 11.1111111111,
     return obj
 
 
-def _plan(iid: str, up, down, double: bool = False, adjustable=None,
+def _dir(boundaries, green_mask, adjust=None) -> dict:
+    """Build a v2 DirectionPlan dict directly.
+
+    boundaries: positions in (0,1); for double-cycle plans use (0,0.5).
+    green_mask: len(boundaries)+1 booleans.
+    adjust: optional {boundary_index: [lo, hi]}.
+    """
+    boundaries = list(boundaries)
+    assert len(green_mask) == len(boundaries) + 1
+    out = []
+    for i, pos in enumerate(boundaries):
+        item = {"pos_r": float(pos)}
+        if adjust and i in adjust:
+            item["adjust"] = [float(adjust[i][0]), float(adjust[i][1])]
+        out.append(item)
+    return {"boundaries": out, "green_mask": [bool(x) for x in green_mask]}
+
+
+def _plan(iid: str, up_dir: dict, down_dir: dict,
           hard=(), soft=()) -> dict:
-    return {"id": f"{iid}_P1", "intersection": iid, "double_cycle": double,
-            "windows": {"up": up, "down": down},
-            "adjustable": adjustable or {"up": {}, "down": {}},
+    return {"id": f"{iid}_P1", "intersection": iid, "min_phase_s": 1e-3,
+            "directions": {"up": up_dir, "down": down_dir},
             "hard_constraints": list(hard), "soft_constraints": list(soft)}
 
 
@@ -89,14 +106,17 @@ def main() -> None:
         "intersections": ["I1", "I2", "I3"],
         "segments": [_seg("I1", "I2"), _seg("I2", "I3")],
     }
-    plans3 = [_plan(i, [[0.0, 0.45]], [[0.5, 0.95]]) for i in ("I1", "I2", "I3")]
+    up_green_45 = _dir([0.45], [True, False])
+    down_green_50_95 = _dir([0.5, 0.95], [False, True, False])
+    plans3 = [_plan(i, up_green_45, down_green_50_95) for i in ("I1", "I2", "I3")]
     render("01_perfect_green_wave", _problem(corridor3, plans3, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
          "weight": 1.0, "margin": {"delta_min_s": 0.0}},
     ]))
 
     # 02: bidirectional green waves (T3)
-    plans_bi = [_plan(i, [[0.0, 0.45]], [[0.0, 0.45]]) for i in ("I1", "I2", "I3")]
+    both_green_45 = _dir([0.45], [True, False])
+    plans_bi = [_plan(i, both_green_45, both_green_45) for i in ("I1", "I2", "I3")]
     render("02_bidirectional_green", _problem(corridor3, plans_bi, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
          "weight": 1.0, "margin": {"delta_min_s": 0.0}},
@@ -105,7 +125,8 @@ def main() -> None:
     ]))
 
     # 03: multi-window / multi-band (T4)
-    plans_mw = [_plan(i, [[0.0, 0.2], [0.5, 0.7]], [[0.0, 0.2], [0.5, 0.7]])
+    two_green_windows = _dir([0.2, 0.5, 0.7], [True, False, True, False])
+    plans_mw = [_plan(i, two_green_windows, two_green_windows)
                 for i in ("I1", "I2", "I3")]
     render("03_multi_window_multi_band", _problem(corridor3, plans_mw, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
@@ -118,8 +139,8 @@ def main() -> None:
         "intersections": ["I1", "I2"],
         "segments": [_seg("I1", "I2", dist=200.0, v=10.0)],
     }
-    plans_red = [_plan("I1", [[0.0, 0.45]], [[0.0, 0.45]]),
-                 _plan("I2", [[0.0, 0.45]], [[0.0, 0.45]])]
+    plans_red = [_plan("I1", both_green_45, both_green_45),
+                 _plan("I2", both_green_45, both_green_45)]
     render("04_red_wave_pair", _problem(corridor2, plans_red, [
         {"id": "RW_up", "type": "red", "direction": "up", "nodes": ["I1", "I2"],
          "max_bands": 3, "weight": 1.0},
@@ -131,11 +152,11 @@ def main() -> None:
         "intersections": ["I1", "I2"],
         "segments": [_seg("I1", "I2")],
     }
+    # double-cycle: boundaries are declared in (0, 0.5); 0.5 is implicit.
+    dc_green_20 = _dir([0.2], [True, False], adjust={0: [-0.02, 0.02]})
     plans_dc = [
-        _plan("I1", [[0.0, 0.2]], [[0.0, 0.2]], double=True,
-              adjustable={"up": {"0": {"start": [-0.02, 0.02], "end": [-0.02, 0.02]}},
-                          "down": {}}),
-        _plan("I2", [[0.0, 0.45]], [[0.0, 0.45]]),
+        _plan("I1", dc_green_20, dc_green_20),
+        _plan("I2", up_green_45, up_green_45),
     ]
     render("05_double_cycle", _problem(corridor_dc, plans_dc, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2"],
@@ -160,9 +181,9 @@ def main() -> None:
     # Up direction gets a full green band; down direction has tailored red
     # windows so that two adjacent-pair red bands also survive.
     plans_ugdr = [
-        _plan("I1", [[0.0, 0.45]], [[0.7, 0.9]]),
-        _plan("I2", [[0.0, 0.45]], [[0.3, 0.5]]),
-        _plan("I3", [[0.0, 0.45]], [[0.4, 0.6]]),
+        _plan("I1", up_green_45, _dir([0.7, 0.9], [False, True, False])),
+        _plan("I2", up_green_45, _dir([0.3, 0.5], [False, True, False])),
+        _plan("I3", up_green_45, _dir([0.4, 0.6], [False, True, False])),
     ]
     render("07_up_green_down_red", _problem(corridor3, plans_ugdr, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
@@ -183,13 +204,14 @@ def main() -> None:
 # standard_problem.json 的四类 objective 场景
 # ---------------------------------------------------------------------------
 
-def _standard_demand(did: str, kind: str, direction: str, nodes, weight: float = 1.0):
+def _standard_demand(did: str, kind: str, direction: str, nodes,
+                     weight: float = 1.0, max_bands: int = 1):
     obj = {
         "id": did,
         "type": kind,
         "direction": direction,
         "nodes": list(nodes),
-        "max_bands": 1,
+        "max_bands": max_bands,
         "weight": weight,
     }
     return obj
@@ -225,9 +247,12 @@ def _run_standard_objective_scenarios() -> None:
     # 2) 单绿多红：一个全局上行绿波 + 下行每个相邻对一条红波，最大化带宽和。
     down_red_demands = []
     for i in range(len(nodes) - 1, 0, -1):
+        pair = [nodes[i], nodes[i - 1]]
+        # 双周期 I3 / 单口放行 I4 相邻的红波需求允许两个带。
+        mb = 2 if ("I3" in pair or "I4" in pair) else 1
         down_red_demands.append(_standard_demand(
             f"RW_down_{i + 1}_{i}", "red", "down",
-            [nodes[i], nodes[i - 1]], weight=0.6))
+            pair, weight=0.6, max_bands=mb))
     scenarios.append((
         "standard_case_02_single_green_single_red_sum",
         "Standard Case 2: single green + down red waves, max bandwidth sum",
@@ -241,10 +266,13 @@ def _run_standard_objective_scenarios() -> None:
     # 3) 双向红波：每个相邻对、上下行各一条红波，最大化带宽和。
     red_demands = []
     for i, (a, b) in enumerate(pairs):
+        mb = 2 if ("I3" in (a, b) or "I4" in (a, b)) else 1
         red_demands.append(_standard_demand(
-            f"RW_up_{i + 1}_{i + 2}", "red", "up", [a, b], weight=1.0))
+            f"RW_up_{i + 1}_{i + 2}", "red", "up", [a, b], weight=1.0,
+            max_bands=mb))
         red_demands.append(_standard_demand(
-            f"RW_down_{i + 2}_{i + 1}", "red", "down", [b, a], weight=1.0))
+            f"RW_down_{i + 2}_{i + 1}", "red", "down", [b, a], weight=1.0,
+            max_bands=mb))
     scenarios.append((
         "standard_case_03_bidirectional_red_sum",
         "Standard Case 3: bidirectional red waves, max bandwidth sum",
@@ -289,7 +317,7 @@ def _run_standard_objective_scenarios() -> None:
                     "coef": 1.0,
                 }],
                 "sense": ">=",
-                "rhs": 15.0,
+                "rhs": 25.0,
                 "hard": True,
             }]
         problem["grid"] = {"cycles_s": [140.0], "speed_ratios": [1.0]}

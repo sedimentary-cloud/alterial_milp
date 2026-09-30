@@ -37,7 +37,8 @@ class LinearExpr:
 
     # -- factories -------------------------------------------------------------
     @classmethod
-    def of(cls, h: VarHandle, coef: float = 1.0) -> "LinearExpr":
+    def of(cls, h: VarHandle | "LinearExpr", coef: float = 1.0) -> "LinearExpr":
+        """Wrap a variable or another expression with a scale coefficient."""
         e = cls()
         e.add(h, coef)
         return e
