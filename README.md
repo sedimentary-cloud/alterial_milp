@@ -70,7 +70,9 @@ result = run_multistage(problem, max_rounds=3, restarts=2)
       "stage2_time_limit_s": 10.0,
       "fallback_to_full_milp": true,
       "decompose_stage1": true,
-      "decompose_min_component_size": 2
+      "decompose_min_component_size": 2,
+      "stage1_symmetry_breaking": true,
+      "stage1_min_band_width_s": 1.0
     }
   }
 }

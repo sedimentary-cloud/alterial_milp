@@ -1004,6 +1004,9 @@ class MultistageConfig:
     decompose_stage1: bool = True
     # 至少要有两个规模达到该阈值的独立分量，才真正启用分解。
     decompose_min_component_size: int = 2
+    # Stage-1 是否启用 band slot 对称破缺与正宽度下界。
+    stage1_symmetry_breaking: bool = True
+    stage1_min_band_width_s: float = 1.0
 
     @classmethod
     def from_obj(cls, obj: Any) -> "MultistageConfig":
@@ -1025,6 +1028,9 @@ class MultistageConfig:
             fallback_to_full_milp=bool(obj.get("fallback_to_full_milp", True)),
             decompose_stage1=bool(obj.get("decompose_stage1", True)),
             decompose_min_component_size=int(obj.get("decompose_min_component_size", 2)),
+            stage1_symmetry_breaking=bool(obj.get("stage1_symmetry_breaking", True)),
+            stage1_min_band_width_s=_num(obj.get("stage1_min_band_width_s", 1.0),
+                                         "stage1_min_band_width_s"),
         )
 
 

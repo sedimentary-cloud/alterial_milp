@@ -129,13 +129,17 @@ def ref_label(ref: SoftPenaltyRef) -> str:
 
 
 class ModelBuilder:
-    def __init__(self, problem: ProblemInput, ctx: GridPointContext) -> None:
+    def __init__(self, problem: ProblemInput, ctx: GridPointContext, *,
+                 stage1_symmetry: bool = False,
+                 min_band_width_s: float = 0.0) -> None:
         self.problem = problem
         self.ctx = ctx
         self.C = ctx.cycle_s
         self.vars = VariableRegistry()
         self.cons = ConstraintStore()
         self.m = BigMTable.compute(ctx)
+        self.stage1_symmetry = bool(stage1_symmetry)
+        self.min_band_width_s = max(0.0, float(min_band_width_s))
         self.meta = ModelMeta(problem=problem, ctx=ctx, cycle_s=ctx.cycle_s,
                               anchor_intersection=problem.corridor.intersections[0])
 
@@ -874,6 +878,31 @@ class ModelBuilder:
     # ------------------------------------------------------------------
     # C4-C8 green bands
     # ------------------------------------------------------------------
+    def _add_band_slot_symmetry(self, demand_id: str, qmax: int,
+                               e: dict[int, VarHandle], beta: dict[int, VarHandle],
+                               tag: str) -> None:
+        """Stage-1 对称破缺：带槽存在性单调 + 正宽度下界。
+
+        - e_1 >= e_2 >= ...：存在的带槽必须排在前面，消除空槽置换对称；
+        - beta_q >= w_min * e_q：禁止 e=1 但宽度为 0 的退化带，减少等价分支。
+        """
+        if not self.stage1_symmetry:
+            return
+        for q in range(1, qmax):
+            row = LinearExpr.of(e[q], 1.0).add(e[q + 1], -1.0)
+            self.cons.add(row, ">=", 0.0,
+                          ConstraintMeta("SYM", f"{tag} e slot monotonic {demand_id}/{q}/{q+1}",
+                                         {"demand": demand_id, "slot": str(q),
+                                          "slot2": str(q + 1)}))
+        if self.min_band_width_s > 0.0:
+            for q in range(1, qmax + 1):
+                row = LinearExpr.of(beta[q], 1.0).add(e[q], -self.min_band_width_s)
+                self.cons.add(row, ">=", 0.0,
+                              ConstraintMeta("SYM",
+                                             f"{tag} positive width {demand_id}/{q}",
+                                             {"demand": demand_id, "slot": str(q),
+                                              "min_band_width_s": str(self.min_band_width_s)}))
+
     def _build_green_bands(self) -> None:
         # C4–C8：绿波带。
         # 绿波带是“一条连续的时间区间，沿链上每个路口都落在某个绿灯窗口内”。
@@ -912,6 +941,7 @@ class ModelBuilder:
                                                       "slot": q, "node": node, "window": k})
             gmodel = GreenDemandModel(b, qmax, u, beta, e, a, n, table)
             self.meta.green[b.id] = gmodel
+            self._add_band_slot_symmetry(b.id, qmax, e, beta, "green")
 
             for q in range(1, qmax + 1):
                 # C4：如果这条带存在 e=1，那么链上每个节点都必须恰好
@@ -1139,6 +1169,7 @@ class ModelBuilder:
             rmodel = RedDemandModel(b, qmax, u, beta, e, ag, ar, gw_up, red_down,
                                     ag_slots, ar_keys)
             self.meta.red_demands[b.id] = rmodel
+            self._add_band_slot_symmetry(b.id, qmax, e, beta, "red")
 
             # 红波带边界亲和性：红波带起点尽量贴上游绿窗起点、终点尽量贴上游绿窗终点。
             rb = self.problem.red_boundary_for(b)
@@ -1306,6 +1337,15 @@ class ModelBuilder:
                 # 时间分离：任意两条都存在的红带在圆环上不能重叠，
                 # 否则同一条物理带可能被计数两次。
                 for q2 in range(q + 1, qmax + 1):
+                    if self.stage1_symmetry:
+                        # 红带 q 槽也按起点排序；不存在时用 big-M 放松。
+                        row = LinearExpr.of(u[q], 1.0).add(u[q2], -1.0)
+                        row.add(e[q], M).add(e[q2], M)
+                        self.cons.add(row, "<=", 2.0 * M,
+                                      ConstraintMeta("SYM",
+                                                     f"red u order {b.id}/{q}/{q2}",
+                                                     {"demand": b.id, "slot": str(q),
+                                                      "slot2": str(q2)}))
                     row = LinearExpr.of(u[q], 1.0).add(beta[q], 1.0)
                     row.add(u[q2], -1.0).add(e[q], M).add(e[q2], M)
                     self.cons.add(row, "<=", 2.0 * M,

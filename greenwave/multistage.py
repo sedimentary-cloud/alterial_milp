@@ -82,6 +82,17 @@ class PriorSolution:
 
 
 @dataclass(frozen=True)
+class StageTimeRecord:
+    """一次 Stage-1 或 Stage-2 调用的耗时记录。"""
+
+    start_idx: int
+    round_idx: int
+    stage: str              # "stage1" | "stage2"
+    time_s: float
+    objective: float | None = None
+
+
+@dataclass(frozen=True)
 class MultistageResult:
     """多阶段求解结果，可直接转成 GridPointResult。"""
 
@@ -92,6 +103,10 @@ class MultistageResult:
     rounds: int = 0
     history: tuple[float, ...] = ()
     message: str = ""
+    # 多阶段各阶段累计耗时；用于 benchmark / profile。
+    stage1_time_s: float = 0.0
+    stage2_time_s: float = 0.0
+    stage_records: tuple[StageTimeRecord, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -591,9 +606,17 @@ def solve_fixed_boundaries(
     time_limit_s: float | None = None,
     mip_rel_gap: float | None = None,
     decompose: bool | None = None,
+    symmetry_breaking: bool | None = None,
+    min_band_width_s: float | None = None,
 ) -> tuple[SolutionRecord, PriorSolution, ArterialModel, SolveResult] | None:
     """Stage 1：固定 δ，求解组合 MIP。"""
-    model = ModelBuilder(problem, ctx).build()
+    cfg_ms = problem.solver.multistage
+    use_symmetry = (cfg_ms.stage1_symmetry_breaking
+                    if symmetry_breaking is None else bool(symmetry_breaking))
+    min_width = (cfg_ms.stage1_min_band_width_s
+                 if min_band_width_s is None else float(min_band_width_s))
+    model = ModelBuilder(problem, ctx, stage1_symmetry=use_symmetry,
+                         min_band_width_s=min_width).build()
     freeze_boundaries(model, adjustments_r, ctx)
 
     use_decompose = (problem.solver.multistage.decompose_stage1
@@ -756,13 +779,22 @@ def solve_multistage(
     history: list[float] = []
     total_rounds = 0
     messages: list[str] = []
+    stage1_time = 0.0
+    stage2_time = 0.0
+    stage_records: list[StageTimeRecord] = []
 
     stage1_limit = cfg.stage1_time_limit_s
     stage2_limit = cfg.stage2_time_limit_s
 
     for start_idx, adjustments in enumerate(starts):
+        t_stage = time.perf_counter()
         s1 = solve_fixed_boundaries(problem, ctx, adjustments,
                                     time_limit_s=stage1_limit)
+        dt_stage = time.perf_counter() - t_stage
+        stage1_time += dt_stage
+        stage_records.append(StageTimeRecord(
+            start_idx=start_idx, round_idx=0, stage="stage1", time_s=dt_stage,
+            objective=None if s1 is None else float(s1[0].composite_s)))
         if s1 is None:
             messages.append(f"start{start_idx}: stage1 no solution")
             continue
@@ -772,8 +804,15 @@ def solve_multistage(
 
         for round_idx in range(max(0, int(cfg.max_rounds))):
             total_rounds += 1
+            t_stage = time.perf_counter()
             s2 = solve_fixed_combo_lp(problem, ctx, cur_prior,
                                       time_limit_s=stage2_limit)
+            dt_stage = time.perf_counter() - t_stage
+            stage2_time += dt_stage
+            stage_records.append(StageTimeRecord(
+                start_idx=start_idx, round_idx=round_idx, stage="stage2",
+                time_s=dt_stage,
+                objective=None if s2 is None else float(s2[0].composite_s)))
             if s2 is None:
                 messages.append(f"start{start_idx}/round{round_idx}: stage2 no solution")
                 break
@@ -787,8 +826,15 @@ def solve_multistage(
             history.append(obj2)
 
             # 用 Stage 2 的 φ/δ 再跑一次 Stage 1，继续更新组合。
+            t_stage = time.perf_counter()
             s1b = solve_fixed_boundaries(problem, ctx, cur_prior.adjustments_r,
                                          time_limit_s=stage1_limit)
+            dt_stage = time.perf_counter() - t_stage
+            stage1_time += dt_stage
+            stage_records.append(StageTimeRecord(
+                start_idx=start_idx, round_idx=round_idx, stage="stage1",
+                time_s=dt_stage,
+                objective=None if s1b is None else float(s1b[0].composite_s)))
             if s1b is None:
                 break
             sol1b, prior1b, _m1b, _r1b = s1b
@@ -810,8 +856,11 @@ def solve_multistage(
             status="infeasible", objective=None, solution=None, time_s=elapsed,
             rounds=total_rounds, history=tuple(history),
             message="; ".join(messages) or "multistage found no feasible solution",
+            stage1_time_s=stage1_time, stage2_time_s=stage2_time,
+            stage_records=tuple(stage_records),
         )
-    msg = f"multistage heuristic: rounds={total_rounds}, starts={len(starts)}"
+    msg = (f"multistage heuristic: rounds={total_rounds}, starts={len(starts)}, "
+           f"stage1={stage1_time:.3f}s, stage2={stage2_time:.3f}s")
     if messages:
         msg += " | " + "; ".join(messages)
     return MultistageResult(
@@ -822,11 +871,14 @@ def solve_multistage(
         rounds=total_rounds,
         history=tuple(history),
         message=msg,
+        stage1_time_s=stage1_time,
+        stage2_time_s=stage2_time,
+        stage_records=tuple(stage_records),
     )
 
 
 __all__ = [
-    "PriorBand", "PriorSolution", "MultistageResult",
+    "PriorBand", "PriorSolution", "MultistageResult", "StageTimeRecord",
     "extract_prior", "extract_prior_from_greedy", "validate_prior",
     "freeze_combo", "freeze_boundaries", "unfixed_integrality",
     "find_stage1_components",

@@ -231,6 +231,33 @@ class TestStage1Decomposition(unittest.TestCase):
         self.assertEqual(len(comps), 2)
         self.assertEqual({tuple(c) for c in comps}, {(a.index,), (b.index,)})
 
+    def test_stage1_symmetry_constraints_are_added(self):
+        raw = _two_window_problem(multistage=False)
+        problem = ProblemInput.from_obj(raw)
+        ctx = FeasibilityFilter(problem).filter(100.0, 1.0)
+        model = ModelBuilder(problem, ctx, stage1_symmetry=True,
+                             min_band_width_s=1.0).build()
+        groups = [row.meta.group for row in model.cons.rows]
+        self.assertIn("SYM", groups)
+        labels = [row.meta.label for row in model.cons.rows if row.meta.group == "SYM"]
+        self.assertTrue(any("e slot monotonic" in x for x in labels))
+        self.assertTrue(any("positive width" in x for x in labels))
+
+    def test_stage1_symmetry_preserves_objective_on_small_case(self):
+        raw = _two_window_problem(multistage=False)
+        problem = ProblemInput.from_obj(raw)
+        ctx = FeasibilityFilter(problem).filter(100.0, 1.0)
+        plain = solve_fixed_boundaries(problem, ctx, {}, decompose=False,
+                                       symmetry_breaking=False,
+                                       min_band_width_s=0.0)
+        sym = solve_fixed_boundaries(problem, ctx, {}, decompose=False,
+                                     symmetry_breaking=True,
+                                     min_band_width_s=1.0)
+        self.assertIsNotNone(plain)
+        self.assertIsNotNone(sym)
+        self.assertAlmostEqual(float(plain[0].composite_s), float(sym[0].composite_s),
+                               places=5)
+
     def test_global_constraint_merges_demand_components(self):
         raw = _independent_red_problem()
         raw["global_constraints"] = [{
@@ -291,6 +318,11 @@ class TestMultistageSolver(unittest.TestCase):
         self.assertIsNotNone(result.solution)
         self.assertIsNotNone(result.objective)
         self.assertGreaterEqual(float(result.objective), 0.0)
+        self.assertGreaterEqual(result.stage1_time_s, 0.0)
+        self.assertGreaterEqual(result.stage2_time_s, 0.0)
+        self.assertTrue(result.stage_records)
+        self.assertTrue(any(r.stage == "stage1" for r in result.stage_records))
+        self.assertTrue(any(r.stage == "stage2" for r in result.stage_records))
 
     def test_multistage_improves_fixed_boundary_start(self):
         raw = _two_window_problem(adjustable=True, multistage=True)
