@@ -7,11 +7,11 @@ Entry point::
 """
 from .errors import (GWError, GWInfeasibleGridPoint, GWModelError,
                      GWSolveError, GWValidationError, ValidationIssue)
-from .pipeline import run, run_optimization
+from .pipeline import run, run_multistage, run_optimization
 from .schema.models import ProblemInput
 
 __all__ = [
-    "run", "run_optimization", "ProblemInput",
+    "run", "run_optimization", "run_multistage", "ProblemInput",
     "GWError", "GWValidationError", "GWInfeasibleGridPoint", "GWModelError",
     "GWSolveError", "ValidationIssue",
 ]

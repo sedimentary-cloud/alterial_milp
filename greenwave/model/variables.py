@@ -79,6 +79,19 @@ class VariableRegistry:
         except KeyError as exc:
             raise GWModelError(f"unknown variable {name!r}") from exc
 
+    def fix(self, h: VarHandle, value: float) -> None:
+        """把变量固定为常数（lb = ub = value）。
+
+        多阶段求解的核心技巧：把所有组合变量（方案选择、窗口指派、
+        存在性、回绕周期、红带实例）固定后，MILP 退化为 LP。
+        """
+        v = float(value)
+        self._lbs[h.index] = v
+        self._ubs[h.index] = v
+
+    def fix_by_name(self, name: str, value: float) -> None:
+        self.fix(self.by_name(name), value)
+
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(self._names)

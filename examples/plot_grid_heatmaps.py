@@ -111,6 +111,26 @@ def main() -> None:
     with open(problem_path, "r", encoding="utf-8") as f:
         problem = json.load(f)
 
+    # ------------------------------------------------------------------
+    # 目标：双向全局绿波，max_bands=2，允许共享绿窗。
+    # 去掉红波需求、红波模板、单方向全局约束和贪心。
+    # ------------------------------------------------------------------
+    nodes = list(problem["corridor"]["intersections"])
+    problem["objective"]["band_demands"] = [
+        {"id": "GW_up_full", "type": "green", "direction": "up",
+         "nodes": nodes, "max_bands": 2, "weight": 1.0,
+         "margin": {"delta_min_s": 0.0, "coef": 1.0}},
+        {"id": "GW_down_full", "type": "green", "direction": "down",
+         "nodes": list(reversed(nodes)), "max_bands": 2, "weight": 1.0,
+         "margin": {"delta_min_s": 0.0, "coef": 1.0}},
+    ]
+    problem["objective"]["balanced_groups"] = []
+    problem["objective"]["margin_default"] = {"delta_min_s": 0.0, "coef": 1.0}
+    problem["objective"]["allow_window_sharing"] = True
+    problem["global_constraints"] = []
+    problem["constraint_templates"] = []
+    problem["solver"]["heuristic"]["enabled"] = False
+
     # 高分辨率局部格点：周期和速度步数接近。
     n_cycles = 25
     n_speeds = 25
@@ -119,16 +139,32 @@ def main() -> None:
     speeds = [round(0.30 + 1.20 * i / (n_speeds - 1), 4)
               for i in range(n_speeds)]
     problem["grid"] = {"cycles_s": cycles, "speed_ratios": speeds}
-    problem["solver"]["num_workers"] = 1
+    problem["solver"]["num_workers"] = 8
     # 阶段 1 先只求每个格点最优；Pareto knee 稍后对选中的格点单独扫描。
     problem["objective"]["pareto"] = {"num_points": 0, "relax_max": 0.0, "topk_grids": 1}
 
+    import time
+    t0 = time.perf_counter()
     result = run(problem)
+    grid_wall = time.perf_counter() - t0
+    solve_times = [float(r["solve_time_s"]) for r in result["grid_results"]
+                   if r.get("solve_time_s") is not None]
+    from collections import Counter
+    status_counts = Counter(r.get("status") for r in result["grid_results"])
+    print("=== grid search timing ===")
+    print(f"grid points  : {len(result['grid_results'])}")
+    print(f"statuses     : {dict(status_counts)}")
+    print(f"total wall   : {grid_wall:.3f} s")
+    if solve_times:
+        print(f"solver sum   : {sum(solve_times):.3f} s")
+        print(f"avg solve    : {sum(solve_times)/len(solve_times):.3f} s")
+        print(f"min/max solve: {min(solve_times):.3f} / {max(solve_times):.3f} s")
     out_dir = os.path.join(here, "diagrams")
     out_path = os.path.join(out_dir, "09_grid_heatmaps.png")
     GridHeatmapDiagram.render(
         result, out_path,
-        title=(f"Grid Search Heatmaps ({n_cycles}×{n_speeds}): "
+        title=(f"Bidirectional Global Green (max_bands=2, sharing), "
+               f"Grid Search ({n_cycles}×{n_speeds}): "
                f"C ∈ [{cycles[0]:g},{cycles[-1]:g}], "
                f"κ ∈ [{speeds[0]:g},{speeds[-1]:g}]"),
     )

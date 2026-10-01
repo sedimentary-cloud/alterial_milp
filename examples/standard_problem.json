@@ -877,7 +877,7 @@
           "I5",
           "I6"
         ],
-        "max_bands": 1,
+        "max_bands": 2,
         "weight": 5.0,
         "margin": {
           "delta_min_s": 5.0,
@@ -951,7 +951,7 @@
       "relax_max": 0.3,
       "topk_grids": 1
     },
-    "allow_window_sharing": false,
+    "allow_window_sharing": true,
     "balanced_groups": [],
     "red_boundary_default": {
       "start": {

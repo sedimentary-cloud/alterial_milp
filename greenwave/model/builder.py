@@ -881,7 +881,8 @@ class ModelBuilder:
         for b in self.problem.objective.band_demands:
             if b.type != "green":
                 continue
-            qmax = self.ctx.demand_max_bands(b)
+            qmax = self.ctx.demand_max_bands(
+                b, allow_sharing=self.problem.objective.allow_window_sharing)
             if qmax <= 0:
                 continue
             table = self.ctx.travel[b.id]
@@ -909,7 +910,7 @@ class ModelBuilder:
                                                      GVarType.BINARY,
                                                      {"kind": "green_assignment", "demand": b.id,
                                                       "slot": q, "node": node, "window": k})
-            gmodel = GreenDemandModel(b, qmax, u, beta, e, a, table)
+            gmodel = GreenDemandModel(b, qmax, u, beta, e, a, n, table)
             self.meta.green[b.id] = gmodel
 
             for q in range(1, qmax + 1):
@@ -967,18 +968,34 @@ class ModelBuilder:
                 self.cons.add(row, "<=", 0.0,
                               ConstraintMeta("C6", f"beta<=C*e {b.id}/{q}",
                                              {"demand": b.id, "slot": str(q)}))
-                # C7：多条带按起点排序，避免同一个方案被重复计数。
-                # 如果两条带的路径完全一样，它们可以合并，所以不需要同时存在。
-                if q < qmax:
+                # C7：多带排序 + 圆环时间分离。
+                # 两条带在圆环上不能重叠，否则同一条物理带可能被计数两次。
+                # u_q <= u_q2 是破对称约束：带槽本身可交换，不丢最优解。
+                for q2 in range(q + 1, qmax + 1):
                     M = self.m.containment
-                    row = LinearExpr.of(u[q], 1.0).add(u[q + 1], -1.0)
-                    row.add(e[q], M).add(e[q + 1], M)
+                    # u_q <= u_q2
+                    row = LinearExpr.of(u[q], 1.0).add(u[q2], -1.0)
+                    row.add(e[q], M).add(e[q2], M)
                     self.cons.add(row, "<=", 2.0 * M,
-                                  ConstraintMeta("C7", f"u order {b.id}/{q}",
-                                                 {"demand": b.id, "slot": str(q)}))
-                # C7：窗口独占。
-                # 同一需求的两条带不能在同一路口使用同一个窗口槽位。
-                # 如果打开 allow_window_sharing，就改成“同一槽位时间不重叠”。
+                                  ConstraintMeta("C7", f"u order {b.id}/{q}/{q2}",
+                                                 {"demand": b.id, "slot": str(q),
+                                                  "slot2": str(q2)}))
+                    # q 必须在 q2 起点前结束
+                    row = LinearExpr.of(u[q], 1.0).add(beta[q], 1.0).add(u[q2], -1.0)
+                    row.add(e[q], M).add(e[q2], M)
+                    self.cons.add(row, "<=", 2.0 * M,
+                                  ConstraintMeta("C7", f"band disjoint {b.id}/{q}/{q2}",
+                                                 {"demand": b.id, "slot": str(q),
+                                                  "slot2": str(q2)}))
+                    # q2 绕回 0 点时不能在 q 之前结束后再压到 q
+                    row = LinearExpr.of(u[q2], 1.0).add(beta[q2], 1.0).add(u[q], -1.0)
+                    row.add(e[q], M).add(e[q2], M)
+                    self.cons.add(row, "<=", self.C + 2.0 * M,
+                                  ConstraintMeta("C7", f"band wrap disjoint {b.id}/{q}/{q2}",
+                                                 {"demand": b.id, "slot": str(q),
+                                                  "slot2": str(q2)}))
+                # C7：窗口独占。allow_window_sharing=true 时允许多条带共用
+                # 同一个绿窗，此时由上面的圆环时间分离保证不重叠。
                 if not self.problem.objective.allow_window_sharing:
                     for j, node in enumerate(b.nodes):
                         for k in range(1, self.ctx.max_window_slots(node, d) + 1):
@@ -988,21 +1005,6 @@ class ModelBuilder:
                             self.cons.add(row, "<=", 1.0,
                                           ConstraintMeta("C7", f"window exclusive {b.id}/{node}/{k}",
                                                          {"demand": b.id, "node": node, "window": str(k)}))
-                else:
-                    # Conditional non-overlap for pairs sharing a window slot.
-                    for j, node in enumerate(b.nodes):
-                        for k in range(1, self.ctx.max_window_slots(node, d) + 1):
-                            for q1 in range(1, qmax + 1):
-                                for q2 in range(q1 + 1, qmax + 1):
-                                    M = self.m.containment
-                                    # u_q1+beta_q1 - u_q2 - T? at node times cancel T
-                                    row = LinearExpr.of(u[q1], 1.0).add(beta[q1], 1.0)
-                                    row.add(u[q2], -1.0)
-                                    row.add(a[(q1, j, k)], M).add(a[(q2, j, k)], M)
-                                    self.cons.add(row, "<=", 2.0 * M,
-                                                  ConstraintMeta("C7", f"sharing disjoint {b.id}/{node}/{k}",
-                                                                 {"demand": b.id, "node": node,
-                                                                  "window": str(k)}))
                 # C8：margin 短缺。
                 # 带离绿灯窗口左右边界太近时，把不足的部分记成 σ，
                 # 再乘以系数罚到 composite 目标里。
@@ -1109,7 +1111,8 @@ class ModelBuilder:
             # 预剪枝：保留与某个对方槽位可能配对的 g 和 (r,k)。
             ag_slots, ar_keys = self._red_compatible_keys(gw_up, red_down, tau)
 
-            qmax = self.ctx.demand_max_bands(b)
+            qmax = self.ctx.demand_max_bands(
+                b, allow_sharing=self.problem.objective.allow_window_sharing)
             u = {q: self.vars.add(f"red[{b.id},{q}].u", 0.0, self.C, GVarType.CONTINUOUS,
                                    {"kind": "red_band_start", "demand": b.id, "slot": q})
                  for q in range(1, qmax + 1)}
@@ -1300,14 +1303,18 @@ class ModelBuilder:
                               ConstraintMeta("C13", f"red width<=down {b.id}/{q}",
                                              {"demand": b.id, "slot": str(q)}))
 
-                # 时间分离：任意两条都存在的红带不能重叠。
-                # 不能只加相邻 q，否则 e_q=0 时 q 与 q+2 仍可能重叠。
-                # 按 q 索引强制时间先后，slot 本身对称，因此不丢最优解。
+                # 时间分离：任意两条都存在的红带在圆环上不能重叠，
+                # 否则同一条物理带可能被计数两次。
                 for q2 in range(q + 1, qmax + 1):
                     row = LinearExpr.of(u[q], 1.0).add(beta[q], 1.0)
                     row.add(u[q2], -1.0).add(e[q], M).add(e[q2], M)
                     self.cons.add(row, "<=", 2.0 * M,
                                   ConstraintMeta("C9", f"red time separation {b.id}/{q}/{q2}",
+                                                 {"demand": b.id, "slot": str(q)}))
+                    row = LinearExpr.of(u[q2], 1.0).add(beta[q2], 1.0)
+                    row.add(u[q], -1.0).add(e[q], M).add(e[q2], M)
+                    self.cons.add(row, "<=", self.C + 2.0 * M,
+                                  ConstraintMeta("C9", f"red wrap separation {b.id}/{q}/{q2}",
                                                  {"demand": b.id, "slot": str(q)}))
 
     # ------------------------------------------------------------------

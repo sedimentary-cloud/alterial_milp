@@ -73,7 +73,8 @@ class GridPointContext:
         plans = self.feasible_plans.get(intersection, ())
         return max((p.window_count(d) for p in plans), default=0)
 
-    def demand_max_bands(self, demand: BandDemandSpec) -> int:
+    def demand_max_bands(self, demand: BandDemandSpec,
+                         allow_sharing: bool = False) -> int:
         if demand.type == "red":
             if len(demand.nodes) < 2:
                 return 0
@@ -83,10 +84,12 @@ class GridPointContext:
         chain_max = min((self.max_window_slots(node, demand.direction) for node in demand.nodes), default=0)
         if chain_max <= 0:
             return 0
-        if demand.max_bands is None:
-            q = chain_max
+        if allow_sharing:
+            # With sharing, a single green window at a bottleneck node can host
+            # multiple time-disjoint bands, so do not cap by chain_max.
+            q = int(demand.max_bands) if demand.max_bands is not None else chain_max
         else:
-            q = min(int(demand.max_bands), chain_max)
+            q = chain_max if demand.max_bands is None else min(int(demand.max_bands), chain_max)
         return max(1, q)
 
     def max_cum_T_s(self) -> float:

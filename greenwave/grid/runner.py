@@ -79,6 +79,79 @@ def _stage1_worker(payload):
 
 def _solve_stage1(problem: ProblemInput, ctx: GridPointContext,
                   solver_cfg: SolverConfig) -> GridPointResult:
+    """Stage 1：默认完整 MILP；开启 multistage 后走多阶段快速路径。"""
+    if solver_cfg.multistage.enabled:
+        return _solve_stage1_multistage(problem, ctx, solver_cfg)
+    return _solve_stage1_full_milp(problem, ctx, solver_cfg)
+
+
+def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
+                             solver_cfg: SolverConfig) -> GridPointResult:
+    from ..multistage import solve_multistage
+
+    try:
+        ms = solve_multistage(problem, ctx, solver_cfg.multistage)
+    except Exception as exc:
+        if not solver_cfg.multistage.fallback_to_full_milp:
+            raise
+        fallback = _solve_stage1_full_milp(problem, ctx, solver_cfg)
+        msg = (f"multistage failed: {type(exc).__name__}: {exc}"
+               f" | fallback to full MILP: {fallback.message}")
+        return GridPointResult(
+            cycle_s=fallback.cycle_s,
+            kappa=fallback.kappa,
+            status=fallback.status,
+            composite_best=fallback.composite_best,
+            heuristic=fallback.heuristic,
+            solution=fallback.solution,
+            dropped=fallback.dropped,
+            time_s=fallback.time_s,
+            message=msg,
+            ctx=fallback.ctx,
+            band_reward_s=fallback.band_reward_s,
+            margin_loss_s=fallback.margin_loss_s,
+            intersection_loss_s=fallback.intersection_loss_s,
+        )
+
+    if ms.solution is None and solver_cfg.multistage.fallback_to_full_milp:
+        # 多阶段没找到可行解时回退完整 MILP，保证原 pipeline 的健壮性。
+        fallback = _solve_stage1_full_milp(problem, ctx, solver_cfg)
+        msg = f"{ms.message} | fallback to full MILP: {fallback.message}"
+        return GridPointResult(
+            cycle_s=fallback.cycle_s,
+            kappa=fallback.kappa,
+            status=fallback.status,
+            composite_best=fallback.composite_best,
+            heuristic=fallback.heuristic,
+            solution=fallback.solution,
+            dropped=fallback.dropped,
+            time_s=ms.time_s + fallback.time_s,
+            message=msg,
+            ctx=fallback.ctx,
+            band_reward_s=fallback.band_reward_s,
+            margin_loss_s=fallback.margin_loss_s,
+            intersection_loss_s=fallback.intersection_loss_s,
+        )
+    solution = ms.solution
+    return GridPointResult(
+        cycle_s=ctx.cycle_s,
+        kappa=ctx.kappa,
+        status=ms.status,
+        composite_best=ms.objective,
+        heuristic=None,
+        solution=solution,
+        dropped=ctx.dropped,
+        time_s=ms.time_s,
+        message=ms.message,
+        ctx=ctx,
+        band_reward_s=None if solution is None else solution.band_reward_s,
+        margin_loss_s=None if solution is None else solution.margin_loss_s,
+        intersection_loss_s=None if solution is None else solution.loss_s,
+    )
+
+
+def _solve_stage1_full_milp(problem: ProblemInput, ctx: GridPointContext,
+                            solver_cfg: SolverConfig) -> GridPointResult:
     model = ModelBuilder(problem, ctx).build()
     backend = make_backend(solver_cfg.backend)
     session = backend.create(model)

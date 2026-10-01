@@ -133,6 +133,7 @@ class SolutionDecoder:
                     width = float(values[gm.beta[q].index])
                     start = float(values[gm.u[q].index])
                     windows: dict[str, int] = {}
+                    wraps: dict[str, int] = {}
                     for j, node in enumerate(b.nodes):
                         best_k, best_v = None, -1.0
                         for k in range(1, meta.ctx.max_window_slots(node, b.direction) + 1):
@@ -141,7 +142,11 @@ class SolutionDecoder:
                                 best_v, best_k = v, k
                         if best_k is not None:
                             windows[node] = best_k
-                    bands.append(ConstructedBand(b.id, q, True, width, start, windows))
+                        nv = gm.n.get((q, j))
+                        if nv is not None:
+                            wraps[node] = int(round(float(values[nv.index])))
+                    bands.append(ConstructedBand(b.id, q, True, width, start, windows,
+                                                 wraps=wraps))
             else:
                 rm = meta.red_demands.get(b.id)
                 if rm is None:

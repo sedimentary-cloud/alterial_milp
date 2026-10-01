@@ -26,14 +26,16 @@ def build_problem() -> dict:
     with open(os.path.join(here, "standard_problem.json"), "r", encoding="utf-8") as f:
         problem = json.load(f)
 
-    # ParetoFrontierDiagram 会画 num_points+1 个 epsilon 采样点；
-    # 这里要 20 个点，所以 num_points=19。
+    # ParetoFrontierDiagram 会画 num_points+1 个 epsilon 采样点。
+    # 快速版：10 个 epsilon 点，允许 1% MIP gap，单次求解上限 20s。
     problem = copy.deepcopy(problem)
     problem["objective"]["pareto"] = {
-        "num_points": 20,
+        "num_points": 10,
         "relax_max": problem["objective"].get("pareto", {}).get("relax_max", 0.3),
         "topk_grids": 1,
     }
+    problem["solver"]["mip_rel_gap"] = 0.01
+    problem["solver"]["time_limit_s"] = 20.0
     return problem
 
 

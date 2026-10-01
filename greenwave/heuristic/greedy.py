@@ -35,6 +35,8 @@ class ConstructedBand:
     start_s: float
     windows: Mapping[str, int] = field(default_factory=dict)
     red_instance: tuple[int, ...] | None = None
+    # (demand, slot, node) -> 回绕周期 n。SolutionDecoder/GreedyConstructor 都写入。
+    wraps: Mapping[str, int] = field(default_factory=dict)
 
 
 # 贪心解：每个路口选什么方案、偏置多少、带有多宽。
@@ -235,13 +237,17 @@ class GreedyConstructor:
         first = nodes[0]
         first_plan = selection[first]
         first_intervals = self._plan_window_abs(first_plan, b.direction, offsets[first], self.C)
-        qmax = self.ctx.demand_max_bands(b)
+        qmax = self.ctx.demand_max_bands(
+            b, allow_sharing=self.problem.objective.allow_window_sharing)
         candidates: list[ConstructedBand] = []
         for k0, (s0, e0, _) in enumerate(first_intervals):
+            # 对外统一使用 1-based 窗口槽位；内部 helper 仍以 0-based 索引方案窗口。
+            k0_out = k0 + 1
             for u0 in {s0, (s0 + e0) / 2.0, e0, s0 + 2.0, e0 - 2.0}:
                 lower = u0
                 upper = e0
-                assignment: dict[str, int] = {first: k0}
+                assignment: dict[str, int] = {first: k0_out}
+                wraps: dict[str, int] = {first: 0}
                 ok = True
                 for j, node in enumerate(nodes[1:], start=1):
                     target = u0 + table.cum_T_s[j]
@@ -249,7 +255,7 @@ class GreedyConstructor:
                     intervals = self._plan_window_abs(plan, b.direction, offsets[node], self.C)
                     best = None
                     # choose the periodic copy that overlaps the current band best
-                    for s, e, k in intervals:
+                    for s, e, k0_inner in intervals:
                         n0 = math.floor((target - s) / self.C)
                         for n in range(n0 - 2, n0 + 4):
                             ss = s + n * self.C
@@ -257,19 +263,22 @@ class GreedyConstructor:
                             lo = max(lower, ss - table.cum_T_s[j])
                             hi = min(upper, ee - table.cum_T_s[j])
                             if hi > lo + 1e-9:
-                                cand = (hi - lo, lo, hi, k)
+                                # (width, lo, hi, k, n)
+                                cand = (hi - lo, lo, hi, k0_inner + 1, n)
                                 if best is None or cand > best:
                                     best = cand
                     if best is None:
                         ok = False
                         break
-                    _, lower, upper, k = best
+                    _, lower, upper, k, n = best
                     assignment[node] = k
+                    wraps[node] = n
                 if not ok:
                     continue
                 width = upper - lower
                 if width > 1e-7:
-                    candidates.append(ConstructedBand(b.id, 0, True, width, lower, dict(assignment)))
+                    candidates.append(ConstructedBand(b.id, 0, True, width, lower,
+                                                      dict(assignment), wraps=dict(wraps)))
         # keep widest non-conflicting bands
         candidates.sort(key=lambda c: (-c.width_s, c.start_s))
         chosen: list[ConstructedBand] = []
@@ -311,7 +320,8 @@ class GreedyConstructor:
             return []
         up_windows = self._plan_window_abs(up_plan, d, offsets[up_node], self.C)
         red_intervals = self._downstream_red_intervals(down_plan, d, offsets[down_node])
-        qmax = self.ctx.demand_max_bands(b)
+        qmax = self.ctx.demand_max_bands(
+            b, allow_sharing=self.problem.objective.allow_window_sharing)
         candidates = []
         k_upper = int(math.ceil((tau + 2 * self.C) / self.C)) + 1
         for s_up, e_up, g in up_windows:
@@ -333,8 +343,10 @@ class GreedyConstructor:
             if key in used:
                 continue
             used.add(key)
+            g_out = g + 1
             chosen.append(ConstructedBand(b.id, len(chosen) + 1, True, width, start,
-                                          {up_node: g, down_node: r}, red_instance=(g, r, k)))
+                                          {up_node: g_out, down_node: r},
+                                          red_instance=(g_out, r, k)))
             if len(chosen) >= qmax:
                 break
         return chosen
@@ -406,8 +418,10 @@ class GreedyConstructor:
                 continue
             plan = selection[node]
             witness = self._witness.get(plan.id, {})
-            s = self._window_endpoint_r(plan, b.direction, slot, "start", witness) * self.C + offsets[node]
-            e = self._window_endpoint_r(plan, b.direction, slot, "end", witness) * self.C + offsets[node]
+            # 对外 windows 统一是 1-based，内部 helper 需要 0-based。
+            slot_inner = slot - 1
+            s = self._window_endpoint_r(plan, b.direction, slot_inner, "start", witness) * self.C + offsets[node]
+            e = self._window_endpoint_r(plan, b.direction, slot_inner, "end", witness) * self.C + offsets[node]
             band_lo = band.start_s + table.cum_T_s[j]
             band_hi = band_lo + band.width_s
             # choose periodic copy containing the band

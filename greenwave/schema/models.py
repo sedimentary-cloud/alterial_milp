@@ -986,7 +986,49 @@ class HeuristicConfig:
         return cls(bool(obj.get("enabled", True)), int(obj.get("refine_rounds", 3)))
 
 
-# 求解器配置：后端、时限、gap、并行数、贪心开关。
+# 多阶段快速优化配置。
+#
+# 默认关闭，保证原 MILP 接口行为不变；开启后 GridRunner 会在每个格点走
+# “固定边界组合优化 + 固定组合 LP + 交替迭代”的启发式路径。
+@dataclass(frozen=True)
+class MultistageConfig:
+    enabled: bool = False
+    max_rounds: int = 3
+    restarts: int = 1
+    # 空值表示沿用 solver.time_limit_s；显式设置可分别控制两个阶段。
+    stage1_time_limit_s: float | None = None
+    stage2_time_limit_s: float | None = None
+    improvement_tol_s: float = 1e-4
+    fallback_to_full_milp: bool = True
+    # Stage-1 是否按变量-约束耦合图自动拆成独立子问题。
+    decompose_stage1: bool = True
+    # 至少要有两个规模达到该阈值的独立分量，才真正启用分解。
+    decompose_min_component_size: int = 2
+
+    @classmethod
+    def from_obj(cls, obj: Any) -> "MultistageConfig":
+        if isinstance(obj, MultistageConfig):
+            return obj
+        if obj is None:
+            return cls()
+        return cls(
+            enabled=bool(obj.get("enabled", False)),
+            max_rounds=int(obj.get("max_rounds", 3)),
+            restarts=int(obj.get("restarts", 1)),
+            stage1_time_limit_s=(
+                _num(obj["stage1_time_limit_s"], "stage1_time_limit_s")
+                if obj.get("stage1_time_limit_s") is not None else None),
+            stage2_time_limit_s=(
+                _num(obj["stage2_time_limit_s"], "stage2_time_limit_s")
+                if obj.get("stage2_time_limit_s") is not None else None),
+            improvement_tol_s=_num(obj.get("improvement_tol_s", 1e-4), "improvement_tol_s"),
+            fallback_to_full_milp=bool(obj.get("fallback_to_full_milp", True)),
+            decompose_stage1=bool(obj.get("decompose_stage1", True)),
+            decompose_min_component_size=int(obj.get("decompose_min_component_size", 2)),
+        )
+
+
+# 求解器配置：后端、时限、gap、并行数、贪心开关、多阶段开关。
 @dataclass(frozen=True)
 class SolverConfig:
     backend: Literal["scipy", "highspy"] = "scipy"
@@ -994,6 +1036,7 @@ class SolverConfig:
     mip_rel_gap: float = 0.0
     num_workers: int = 8
     heuristic: HeuristicConfig = field(default_factory=HeuristicConfig)
+    multistage: MultistageConfig = field(default_factory=MultistageConfig)
 
     @classmethod
     def from_obj(cls, obj: Any) -> "SolverConfig":
@@ -1007,6 +1050,7 @@ class SolverConfig:
             mip_rel_gap=_num(obj.get("mip_rel_gap", 0.0), "mip_rel_gap"),
             num_workers=int(obj.get("num_workers", 8)),
             heuristic=HeuristicConfig.from_obj(obj.get("heuristic")),
+            multistage=MultistageConfig.from_obj(obj.get("multistage")),
         )
 
 
@@ -1215,5 +1259,5 @@ __all__ = [
     "SegmentSpec", "CorridorSpec", "MarginSpec", "RedEdgeSpec", "RedBoundarySpec",
     "BandDemandSpec",
     "BalancedGroupSpec", "ParetoConfig", "ObjectiveConfig", "GridConfig", "HeuristicConfig",
-    "SolverConfig", "ProblemInput",
+    "SolverConfig", "MultistageConfig", "ProblemInput",
 ]

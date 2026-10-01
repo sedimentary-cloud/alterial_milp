@@ -47,6 +47,38 @@ print(result["grid_results"])
 print(result["pareto"]["points"][0]["solution"]["bands"])
 ```
 
+### 多阶段快速优化（可选）
+
+原完整 MILP 接口保持不变。若需要更快的工程启发式，可显式调用：
+
+```python
+from greenwave import run_multistage
+
+result = run_multistage(problem, max_rounds=3, restarts=2)
+```
+
+或在问题 JSON 中开启：
+
+```json
+{
+  "solver": {
+    "multistage": {
+      "enabled": true,
+      "max_rounds": 3,
+      "restarts": 2,
+      "stage1_time_limit_s": 30.0,
+      "stage2_time_limit_s": 10.0,
+      "fallback_to_full_milp": true,
+      "decompose_stage1": true,
+      "decompose_min_component_size": 2
+    }
+  }
+}
+```
+
+多阶段算法先固定相位边界重选组合变量，再固定组合用 LP 调整 `φ/δ/u/β`，
+交替迭代；它是启发式，不保证全局最优。找不到可行解时默认回退完整 MILP。
+
 ## 模块结构
 
 ```text

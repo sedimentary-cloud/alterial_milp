@@ -82,6 +82,7 @@ class GreenDemandModel:
     beta: dict[int, VarHandle]
     e: dict[int, VarHandle]
     a: dict[tuple[int, int, int], VarHandle]   # (q, chain_node_index, green_slot_1based)
+    n: dict[tuple[int, int], VarHandle]        # (q, chain_node_index) -> wrap period
     table: object
 
 

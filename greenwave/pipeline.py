@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from .errors import GWValidationError
@@ -50,6 +51,30 @@ def run(problem_json: dict[str, Any], semantics: dict[str, Any] | list[dict[str,
     return ReportBuilder.build(grid_report, pareto_groups)
 
 
+def run_multistage(problem_json: dict[str, Any],
+                   semantics: dict[str, Any] | list[dict[str, Any]] | None = None,
+                   **overrides: Any) -> dict[str, Any]:
+    """显式启用多阶段快速优化的入口。
+
+    原 ``run`` 接口保持不变；该函数会复制输入 JSON，在 ``solver.multistage``
+    中写入 ``enabled=True`` 后复用完整 pipeline（校验、格点、Pareto、报告）。
+    支持的 overrides 与 ``MultistageConfig`` 字段一致，例如 ``max_rounds=4``、
+    ``restarts=3``。
+    """
+    if not isinstance(problem_json, dict):
+        raise TypeError("run_multistage expects a problem JSON object/dict")
+    raw = copy.deepcopy(problem_json)
+    if semantics is not None:
+        from .semantic import compile_semantics
+        raw = compile_semantics(raw, semantics).problem_json
+    solver = raw.setdefault("solver", {})
+    ms = solver.setdefault("multistage", {})
+    ms["enabled"] = True
+    for key, value in overrides.items():
+        ms[key] = value
+    return run(raw)
+
+
 run_optimization = run
 
-__all__ = ["run", "run_optimization"]
+__all__ = ["run", "run_optimization", "run_multistage"]
