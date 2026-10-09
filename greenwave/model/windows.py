@@ -13,6 +13,7 @@ from ..errors import GWModelError
 from ..preprocess.context import GridPointContext
 from ..schema.models import Direction, PlanSpec, ProblemInput
 from .constraints import ConstraintMeta, ConstraintStore
+from . import naming
 from .expressions import LinearExpr
 from .variables import GVarType, VarHandle, VariableRegistry
 
@@ -63,11 +64,16 @@ class EffectiveWindowBuilder:
         For a multi-plan intersection, ``boundary_vars`` stores z = x * delta,
         so the edge is ``nominal*C*x + C*z``.  For a single fixed plan it stores
         delta directly, so the edge is ``nominal*C + C*delta``.
+
+        **方案无关的常数端点也要乘 x_p**：有效窗口端点是 Σ_p endpoint_p，
+        若常数端点（周期首尾、双周期的 0.5 seam）对每个方案各加一次，
+        就会被重复计成"方案个数 × 常数"。
         """
         kind, src, offset = plan.expanded_edge_sources(d)[edge]
-        if kind == "const":
-            return LinearExpr.constant(float(offset) * self.C)
         x = self.plan_vars.get(plan.id)
+        if kind == "const":
+            val = float(offset) * self.C
+            return LinearExpr.constant(val) if x is None else LinearExpr.of(x, val)
         nominal = plan.nominal_boundary_r(d, src) + offset
         if x is None:
             expr = LinearExpr.constant(nominal * self.C)
@@ -85,7 +91,12 @@ class EffectiveWindowBuilder:
         edge = w.start_edge if side == "start" else w.end_edge
         expr = self._plan_selected_expr(plan, d, edge)
         if side == "end" and w.wrap:
-            expr.add_const(self.C)
+            # 跨 0/C 的 +C 也只属于被选中的那个方案。
+            x = self.plan_vars.get(plan.id)
+            if x is None:
+                expr.add_const(self.C)
+            else:
+                expr.add(x, self.C)
         return expr
 
     # -- public ---------------------------------------------------------------
@@ -101,7 +112,7 @@ class EffectiveWindowBuilder:
         h_vars: dict[int, VarHandle] = {}
         for k in range(1, kmax + 1):
             h_lo, h_hi = (1.0, 1.0) if fixed_single else (0.0, 1.0)
-            h = self.registry.add(f"win[{intersection},{d},{k}].h", h_lo, h_hi,
+            h = self.registry.add(naming.win_avail(intersection, d, k), h_lo, h_hi,
                                   GVarType.CONTINUOUS, {"kind": "window_availability"})
             h_vars[k] = h
             s_expr = LinearExpr()

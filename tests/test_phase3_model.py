@@ -7,6 +7,7 @@ import unittest
 
 from greenwave.preprocess.feasibility import FeasibilityFilter
 from greenwave.model.builder import ModelBuilder
+from greenwave.model import naming
 from greenwave.schema.models import PlanSpec, ProblemInput
 from greenwave.solve import make_backend
 from greenwave.solve.backend_base import SolveOptions
@@ -95,7 +96,7 @@ class TestBoundaryModel(unittest.TestCase):
         problem, ctx, model, result = _solve(_base(plans, demands))
         self.assertEqual(result.status.value, "optimal")
         # A single declared boundary delta is shared by both half-cycle copies.
-        self.assertEqual(sum(1 for v in model.vars if v.name.startswith("bd[I1_P1,up")), 1)
+        self.assertEqual(sum(1 for v in model.vars if v.name.startswith("bnd_delta[I1_P1,up")), 1)
         self.assertGreater(model.expr_composite().evaluate(result.values), 0.0)
 
     def test_double_cycle_window_touching_half_seam(self):
@@ -205,3 +206,107 @@ class TestBoundaryModel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVariableNaming(unittest.TestCase):
+    """变量名必须全部由 ``greenwave/model/naming.py`` 生成。
+
+    这条守则的意义：变量名散着用 f-string 拼时，会出现"同一个字母在不同族里表示
+    不同东西"（`e` 既是带存在性又是窗口终点、`n` 既是回绕周期又是节点记号……），
+    读日志和读代码都要猜。任何新增变量族都必须先在 naming.py 里登记。
+    """
+
+    CYCLE = 100.0
+
+    @classmethod
+    def _rich_raw(cls) -> dict:
+        """尽量覆盖所有变量族的案例：多方案 + 可调边界 + 绿波 margin + 红波 + 均衡组。"""
+        def plan(pid, iid, bnds, mask, adjust=None, hard=(), soft=()):
+            bounds = []
+            for j, pos in enumerate(bnds):
+                b = {"pos_r": pos}
+                if adjust and j in adjust:
+                    b["adjust"] = list(adjust[j])
+                bounds.append(b)
+            return {"id": pid, "intersection": iid, "double_cycle": False,
+                    "min_phase_s": 0.001,
+                    "directions": {d: {"boundaries": [dict(b) for b in bounds],
+                                       "green_mask": list(mask)} for d in ("up", "down")},
+                    "hard_constraints": list(hard), "soft_constraints": list(soft)}
+
+        soft_c = {"id": "up_end_soft", "terms": [{"atom": {
+            "kind": "boundary", "intersection": "I1", "plan": "I1_A",
+            "direction": "up", "index": 0}, "coef": 1.0}],
+            "sense": "<=", "rhs_ratio": 0.55, "hard": False,
+            "soft": {"coef": 1.0, "owner": "intersection_loss"}}
+        plans = [plan("I1_A", "I1", [0.5], [True, False], soft=(soft_c,)),
+                 plan("I1_B", "I1", [0.05, 0.4, 0.9], [True, False, True, False],
+                      adjust={1: [0.0, 0.05]}),
+                 plan("I2_P1", "I2", [0.5], [True, False], adjust={0: [0.0, 0.1]}),
+                 plan("I3_P1", "I3", [0.5], [True, False])]
+        return {
+            "corridor": {"corridor_id": "naming", "intersections": ["I1", "I2", "I3"],
+                         "segments": [_segment("I1", "I2", 300.0, 15.0),
+                                      _segment("I2", "I3", 300.0, 15.0)]},
+            "plans": plans,
+            "objective": {
+                "band_demands": [
+                    {"id": "GW_up", "type": "green", "direction": "up",
+                     "nodes": ["I1", "I2", "I3"], "max_bands": 1, "weight": 1.0,
+                     "margin": {"delta_min_s": 5.0, "coef": 1.0, "hard_min_s": 1.0}},
+                    {"id": "RW_dn", "type": "red", "direction": "down",
+                     "nodes": ["I3", "I2"], "max_bands": 1, "weight": 1.0},
+                ],
+                "balanced_groups": [{"id": "BG", "demands": ["GW_up"], "weight": 1.0,
+                                     "on_infeasible": "skip", "min_existing": 1,
+                                     "min_existing_penalty_s": 1.0}],
+                "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
+                "red_boundary_default": {"start": {"free_s": 3.0, "coef": 0.2}},
+                "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1},
+                "allow_window_sharing": True,
+            },
+            "grid": {"cycles_s": [cls.CYCLE], "speed_ratios": [1.0]},
+            "solver": {"backend": "scipy", "time_limit_s": 20.0, "mip_rel_gap": 0.0,
+                       "num_workers": 1, "heuristic": {"enabled": False}},
+        }
+
+    def test_every_family_is_registered_in_naming(self):
+        problem = ProblemInput.from_obj(self._rich_raw())
+        ctx = FeasibilityFilter(problem).filter(self.CYCLE, 1.0)
+        model = ModelBuilder(problem, ctx).build()
+        families = {naming.family_of(n) for n in model.vars.names}
+        unknown = sorted(families - set(naming.ALL_FAMILIES))
+        self.assertFalse(unknown, f"这些变量族没走 naming.py：{unknown}")
+
+    def test_rich_case_really_covers_the_families(self):
+        """防止上一条测试空转：确认这个案例真的产出了各大变量族。"""
+        problem = ProblemInput.from_obj(self._rich_raw())
+        ctx = FeasibilityFilter(problem).filter(self.CYCLE, 1.0)
+        model = ModelBuilder(problem, ctx).build()
+        families = {naming.family_of(n) for n in model.vars.names}
+        for required in (naming.PLAN_ON, naming.OFFSET, naming.BND_DELTA,
+                         naming.BND_XDELTA, naming.WIN_AVAIL, naming.GW_START,
+                         naming.GW_WIDTH, naming.GW_ON, naming.GW_WIN,
+                         naming.GW_CYCLE, naming.GW_MARGIN_LO, naming.GW_MARGIN_HI,
+                         naming.RW_START, naming.RW_WIDTH, naming.RW_ON,
+                         naming.RW_DOWN_WIN, naming.RW_UP_CYCLE,
+                         naming.RW_EDGE_START, naming.BAL_MIN, naming.BAL_PRESENT,
+                         naming.BAL_DEFICIT, naming.SOFT_SLACK):
+            self.assertIn(required, families, f"案例没覆盖到 {required}")
+
+    def test_parse_helpers_round_trip(self):
+        """构造→解析必须能对回去（分解层按名字拼装全靠它）。"""
+        name = naming.gw_win("GW_up", 2, "I4", 1)
+        self.assertEqual(name, "gw_win[GW_up,2,I4,1]")
+        self.assertEqual(naming.family_of(name), naming.GW_WIN)
+        self.assertEqual(naming.keys_of(name), ("GW_up", "2", "I4", "1"))
+        self.assertIsNone(naming.plan_of(name))
+        bd = naming.bnd_xdelta("I2_P1", "up", 1)
+        self.assertEqual(naming.plan_of(bd), "I2_P1")
+        self.assertEqual(naming.plan_of(naming.bnd_delta("I1_B", "down", 0)), "I1_B")
+        self.assertEqual(naming.plan_of(naming.soft_slack("I2_P1.c1", "pos")), "I2_P1")
+        # 用户全局软约束的名字是 `soft_slack[<约束 id>.pos]`，取出来的是约束 id；
+        # 它不可能等于任何方案 id，所以"未选中方案 → 置 0"那条规则不会误伤它。
+        self.assertEqual(naming.plan_of(naming.soft_slack("c_global", "neg")), "c_global")
+        self.assertEqual(naming.offset_intersection(naming.offset("I5")), "I5")
+        self.assertIsNone(naming.offset_intersection(name))

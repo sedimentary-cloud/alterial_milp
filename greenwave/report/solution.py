@@ -176,8 +176,11 @@ class SolutionDecoder:
                         windows[b.nodes[1]] = r
                         if best_g is not None:
                             red_instance = (best_g, r, k)
+                    m_var = rm.m_shift.get(q)
+                    up_wrap = 0 if m_var is None else int(round(float(values[m_var.index])))
                     bands.append(ConstructedBand(b.id, q, True, width, start, windows,
-                                                 red_instance=red_instance))
+                                                 red_instance=red_instance,
+                                                 red_up_wrap=up_wrap))
 
         # 存在性 e=1 但宽度为 0 的带是 MILP 的退化最优解；
         # 报告/绘图层面直接忽略，避免出现一条零宽度的假带。
@@ -354,6 +357,7 @@ class ReportBuilder:
                 "start_at_anchor_s": b.start_s,
                 "windows": dict(b.windows),
                 "red_instance": None if b.red_instance is None else list(b.red_instance),
+                "red_up_wrap": int(b.red_up_wrap),
             } for b in sol.bands],
             "constraint_violations": [{
                 "id": v.constraint_id,

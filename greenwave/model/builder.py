@@ -32,6 +32,7 @@ from ..preprocess.context import GridPointContext
 from ..schema.models import (BandDemandSpec, ConstraintSpec, ConstraintTemplate,
                              Direction, PlanSpec, ProblemInput, Side)
 from .constraints import ConstraintMeta, ConstraintStore
+from . import naming
 from .expressions import LinearExpr
 from .meta import (BalancedGroupModel, BigMTable, GreenDemandModel,
                    MarginSlackRef, ModelMeta, RedBoundarySlackRef,
@@ -131,7 +132,8 @@ def ref_label(ref: SoftPenaltyRef) -> str:
 class ModelBuilder:
     def __init__(self, problem: ProblemInput, ctx: GridPointContext, *,
                  stage1_symmetry: bool = False,
-                 min_band_width_s: float = 0.0) -> None:
+                 min_band_width_s: float = 0.0,
+                 phi_fix: Mapping[str, float] | None = None) -> None:
         self.problem = problem
         self.ctx = ctx
         self.C = ctx.cycle_s
@@ -140,6 +142,10 @@ class ModelBuilder:
         self.m = BigMTable.compute(ctx)
         self.stage1_symmetry = bool(stage1_symmetry)
         self.min_band_width_s = max(0.0, float(min_band_width_s))
+        # 某些路口（例如语义子问题的共享路口）需要在**建模前**就固定 φ，
+        # 因为回绕整数 n 的可行区间是用 φ 的上下界推出来的；建完再改 φ 会让
+        # n 的区间失效，把最优解卡住。
+        self.phi_fix: dict[str, float] = dict(phi_fix or {})
         self.meta = ModelMeta(problem=problem, ctx=ctx, cycle_s=ctx.cycle_s,
                               anchor_intersection=problem.corridor.intersections[0])
 
@@ -184,7 +190,7 @@ class ModelBuilder:
                 continue
             row = LinearExpr()
             for p in plans:
-                h = self.vars.add(f"x[{iid},{p.id}]", 0.0, 1.0, GVarType.BINARY,
+                h = self.vars.add(naming.plan_on(iid, p.id), 0.0, 1.0, GVarType.BINARY,
                                   {"kind": "plan_selection", "intersection": iid, "plan": p.id})
                 self.meta.plan_vars[p.id] = h
                 row.add(h, 1.0)
@@ -197,8 +203,11 @@ class ModelBuilder:
         # 防止出现无穷多个等价解。
         for iid in self.problem.corridor.intersections:
             is_anchor = (iid == self.meta.anchor_intersection)
-            h = self.vars.add(f"phi[{iid}]", 0.0, 0.0 if is_anchor else self.C,
-                              GVarType.CONTINUOUS,
+            lo, hi = 0.0, 0.0 if is_anchor else self.C
+            if iid in self.phi_fix:
+                v = min(max(float(self.phi_fix[iid]), 0.0), float(self.C))
+                lo = hi = v
+            h = self.vars.add(naming.offset(iid), lo, hi, GVarType.CONTINUOUS,
                               {"kind": "offset", "intersection": iid, "anchor": is_anchor})
             self.meta.phi[iid] = h
 
@@ -217,7 +226,7 @@ class ModelBuilder:
                         expr = LinearExpr.constant(nominal * self.C)
                         if r is not None:
                             delta = self.vars.add(
-                                f"bd[{p.id},{d},{j}]", r[0], r[1], GVarType.CONTINUOUS,
+                                naming.bnd_delta(p.id, d, j), r[0], r[1], GVarType.CONTINUOUS,
                                 {"kind": "boundary_adjustment", "plan": p.id,
                                  "direction": d, "boundary": j})
                             self.meta.boundary_delta[(p.id, d, j)] = delta
@@ -225,7 +234,7 @@ class ModelBuilder:
                             if not fixed:
                                 x = self.meta.plan_vars[p.id]
                                 z = self.vars.add(
-                                    f"bz[{p.id},{d},{j}]", min(0.0, r[0]), max(0.0, r[1]),
+                                    naming.bnd_xdelta(p.id, d, j), min(0.0, r[0]), max(0.0, r[1]),
                                     GVarType.CONTINUOUS,
                                     {"kind": "bilinear_x_delta", "plan": p.id,
                                      "direction": d, "boundary": j})
@@ -432,6 +441,36 @@ class ModelBuilder:
                 out[slot] = (min(s_mins), max(s_maxs), min(e_mins), max(e_maxs))
         return out
 
+    def _green_wrap_bounds_for_node(self, intersection: str, d: Direction,
+                                   cum_T_s: float) -> dict[int, tuple[int, int] | None]:
+        """按窗口槽预计算绿带回绕周期 n 的可行整数范围。
+
+        对每个 k：
+            n_hi = floor((u_max + T_j - phi_min - s_min) / C)
+            n_lo = ceil((u_min + beta_min + T_j - phi_max - e_max) / C)
+        若 n_lo > n_hi，则标记该 (node,k) 不可行。
+        返回 {k: (n_lo, n_hi) | None}。
+        """
+        gw = self.meta.effective.get((intersection, d))
+        if gw is None:
+            return {}
+        slot_bounds = self._window_slot_bounds(gw)
+        phi = self.meta.phi.get(intersection)
+        if phi is None:
+            return {k: None for k in slot_bounds}
+        phi_lo = float(self.vars.lbs[phi.index])
+        phi_hi = float(self.vars.ubs[phi.index])
+        u_lo, u_hi = 0.0, float(self.C)
+        beta_lo = (float(self.min_band_width_s)
+                   if (self.stage1_symmetry and self.min_band_width_s > 0.0) else 0.0)
+        C = float(self.C)
+        out: dict[int, tuple[int, int] | None] = {}
+        for k, (s_lo, _s_hi, _e_lo, e_hi) in slot_bounds.items():
+            n_hi = math.floor((u_hi + cum_T_s - phi_lo - s_lo) / C + 1e-9)
+            n_lo = math.ceil((u_lo + beta_lo + cum_T_s - phi_hi - e_hi) / C - 1e-9)
+            out[k] = (int(n_lo), int(n_hi)) if n_lo <= n_hi else None
+        return out
+
     def _red_slot_bounds(self, red_down: RedWindowSet):
         """下游红窗槽位的实际起止上下界（含可调范围），按方案取并集。"""
         d = red_down.direction
@@ -462,15 +501,52 @@ class ModelBuilder:
                 out[rid] = (min(s_mins), max(s_maxs), min(e_mins), max(e_maxs))
         return out
 
+    def _red_upstream_wrap_bounds(self, gw_up: EffectiveWindowSet, tau: float
+                                  ) -> dict[int, tuple[int, int] | None]:
+        """红带上游包含式的整数周期下标 m 的可行范围（与绿带的 n 完全对称）。
+
+        红带的上游行（``ag=1`` 时）是：
+
+            s_g ≤ u - τ - φ_up - m·C ≤ e_g
+
+        即
+
+            m_hi = floor((u_max - τ - φ_min - s_min) / C)
+            m_lo = ceil ((u_min + β_min - τ - φ_max - e_max) / C)
+
+        没有 m 时，``u - τ - φ_up`` 只能落在 ``(-C-τ, C-τ)``，而上游窗口在
+        ``[0, C]``；当上游窗口靠后 + 行程时间较长时，``u - τ - φ_up`` 需要
+        ``+C`` 才够得着，模型就表示不出那个物理上完全可行的摆放——表现就是
+        "把整组做时间平移后最优值会掉"。m 补上这一维后，红带模型和绿带一样
+        对时间平移严格不变。
+        """
+        C = float(self.C)
+        up_bounds = self._window_slot_bounds(gw_up)
+        phi = self.meta.phi.get(gw_up.intersection)
+        if phi is None:
+            return {g: None for g in up_bounds}
+        phi_lo = float(self.vars.lbs[phi.index])
+        phi_hi = float(self.vars.ubs[phi.index])
+        u_lo, u_hi = 0.0, C
+        beta_lo = (float(self.min_band_width_s)
+                   if (self.stage1_symmetry and self.min_band_width_s > 0.0) else 0.0)
+        out: dict[int, tuple[int, int] | None] = {}
+        for g, (s_lo, _s_hi, _e_lo, e_hi) in up_bounds.items():
+            m_hi = math.floor((u_hi - tau - phi_lo - s_lo) / C + 1e-9)
+            m_lo = math.ceil((u_lo + beta_lo - tau - phi_hi - e_hi) / C - 1e-9)
+            out[g] = (int(m_lo), int(m_hi)) if m_lo <= m_hi else None
+        return out
+
     def _red_compatible_keys(self, gw_up: EffectiveWindowSet, red_down: RedWindowSet,
-                             tau: float):
+                             tau: float,
+                             m_ranges: Mapping[int, tuple[int, int] | None] | None = None):
         """因式分解后的红波兼容性预剪枝。
 
         返回：(上游绿窗槽 g 的保留列表, 下游红窗实例 (r,k) 的保留列表)。
 
         判定用变量上下界完成，负责：
         1. 相对偏置 Δφ = φ_j - φ_i ∈ (-C,C) 是否可能重叠；
-        2. 绝对时间段是否能被带区间 [u,u+β] 容纳；
+        2. 绝对时间段是否能被带区间 [u,u+β] 容纳（上游侧含周期下标 m 的范围）；
         3. 若某 g 与任何 (r,k) 都不兼容，就不建 ag；
            若某 (r,k) 与任何 g 都不兼容，就不建 ar。
         """
@@ -478,12 +554,18 @@ class ModelBuilder:
         eps = 1e-9
         up_bounds = self._window_slot_bounds(gw_up)
         red_bounds = self._red_slot_bounds(red_down)
+        if m_ranges is None:
+            m_ranges = self._red_upstream_wrap_bounds(gw_up, tau)
         pairs = set()
 
         for g in gw_up.slots:
             if g not in up_bounds:
                 continue
             s_lo, s_hi, e_lo, e_hi = up_bounds[g]
+            mr = m_ranges.get(g)
+            if mr is None:
+                continue                      # 该上游窗口槽根本无可行 m
+            m_lo_g, m_hi_g = mr
             for r in red_down.slots:
                 if r not in red_bounds:
                     continue
@@ -494,10 +576,9 @@ class ModelBuilder:
                 k_lo = math.floor((s_lo + tau - re_hi - C) / C + eps) + 1
                 k_hi = math.ceil((e_hi + tau - rs_lo + C) / C - eps) - 1
                 for k in range(k_lo, k_hi + 1):
-                    # 绝对区间：
-                    # 上游平移后：φ_i + s + τ，φ_i∈[0,C]（k 在下游）
-                    up_lo_min = 0.0 + s_lo + tau
-                    up_hi_max = C + e_hi + tau
+                    # 绝对区间：上游 φ_i∈[0,C] 且 m∈[m_lo,m_hi]。
+                    up_lo_min = 0.0 + s_lo + tau + m_lo_g * C
+                    up_hi_max = C + e_hi + tau + m_hi_g * C
                     # 下游红窗：φ_j + rs + kC，φ_j∈[0,C]
                     red_lo_min = 0.0 + rs_lo + k * C
                     red_hi_max = C + re_hi + k * C
@@ -508,7 +589,7 @@ class ModelBuilder:
                         continue
                     if ov_lo_min > C + eps:
                         continue
-                    up_end_lo = 0.0 + e_lo + tau
+                    up_end_lo = 0.0 + e_lo + tau + m_lo_g * C
                     red_end_lo = 0.0 + re_lo + k * C
                     if min(up_end_lo, red_end_lo) > 2.0 * C + eps:
                         continue
@@ -553,7 +634,7 @@ class ModelBuilder:
                             refs: dict[str, str]) -> None:
         """加一条“方案选中时才生效”的软约束，并登记到 meta.soft。"""
         if sense in ("<=", "=="):
-            var_name = f"viol[{name_base}.pos]"
+            var_name = naming.soft_slack(name_base, "pos")
             sigma = self.vars.add(var_name, 0.0, m_big + abs(rhs) + 1.0,
                                   GVarType.CONTINUOUS, {"kind": "soft_violation"})
             row = lhs.copy()
@@ -569,7 +650,7 @@ class ModelBuilder:
                 expr=lhs.copy(), sense="<=", rhs=rhs, coef=coef, owner=owner,
                 plan_id=plan_id, label=var_name))
         if sense in (">=", "=="):
-            var_name = f"viol[{name_base}.neg]"
+            var_name = naming.soft_slack(name_base, "neg")
             sigma = self.vars.add(var_name, 0.0, m_big + abs(rhs) + 1.0,
                                   GVarType.CONTINUOUS, {"kind": "soft_violation"})
             row = lhs.copy()
@@ -630,7 +711,7 @@ class ModelBuilder:
             )
             return
         if sense in ("<=", "=="):
-            var_name = f"viol[{name_base}.pos]"
+            var_name = naming.soft_slack(name_base, "pos")
             sigma = self.vars.add(var_name, 0.0, m_big + abs(rhs) + 1.0,
                                   GVarType.CONTINUOUS, {"kind": "soft_violation"})
             row = lhs.copy()
@@ -647,7 +728,7 @@ class ModelBuilder:
                 expr=lhs.copy(), sense="<=", rhs=rhs, coef=coef, owner=owner,
                 plan_id=plan_id, label=var_name))
         if sense in (">=", "=="):
-            var_name = f"viol[{name_base}.neg]"
+            var_name = naming.soft_slack(name_base, "neg")
             sigma = self.vars.add(var_name, 0.0, m_big + abs(rhs) + 1.0,
                                   GVarType.CONTINUOUS, {"kind": "soft_violation"})
             row = lhs.copy()
@@ -903,6 +984,64 @@ class ModelBuilder:
                                              {"demand": demand_id, "slot": str(q),
                                               "min_band_width_s": str(self.min_band_width_s)}))
 
+    def _add_green_wrap_range_constraints(self, b: BandDemandSpec, q: int,
+                                         e: dict[int, VarHandle],
+                                         n: dict[tuple[int, int], VarHandle],
+                                         a: dict[tuple[int, int, int], VarHandle],
+                                         node_ranges: dict[int, dict[int, tuple[int, int] | None]],
+                                         node_global: dict[int, tuple[int, int]]) -> None:
+        """把预计算的 n 可行范围接入模型。
+
+        - n 与 e 绑定：e=0 时 n=0；
+        - 选中的窗口槽 k 激活对应的 n_lo/n_hi；
+        - n_lo > n_hi 的 (j,k) 直接禁止 a=1。
+        """
+        d = b.direction
+        M = self.m.containment
+        for j, node in enumerate(b.nodes):
+            nv = n[(q, j)]
+            lo, hi = node_global[j]
+            # e=0 -> n=0；e=1 -> lo <= n <= hi。
+            row = LinearExpr.of(nv, 1.0).add(e[q], -hi)
+            self.cons.add(row, "<=", 0.0,
+                          ConstraintMeta("NRANGE",
+                                         f"wrap n<=hi*e {b.id}/{q}/{node}",
+                                         {"demand": b.id, "slot": str(q), "node": node}))
+            row = LinearExpr.of(nv, 1.0).add(e[q], -lo)
+            self.cons.add(row, ">=", 0.0,
+                          ConstraintMeta("NRANGE",
+                                         f"wrap n>=lo*e {b.id}/{q}/{node}",
+                                         {"demand": b.id, "slot": str(q), "node": node}))
+
+            for k in range(1, self.ctx.max_window_slots(node, d) + 1):
+                av = a.get((q, j, k))
+                if av is None:
+                    continue
+                rng = node_ranges.get(j, {}).get(k)
+                if rng is None:
+                    # 该窗口槽下不存在任何整数 n，直接禁止选择它。
+                    self.cons.add(LinearExpr.of(av, 1.0), "==", 0.0,
+                                  ConstraintMeta("NRANGE",
+                                                 f"wrap infeasible {b.id}/{q}/{node}/{k}",
+                                                 {"demand": b.id, "slot": str(q),
+                                                  "node": node, "window": str(k)}))
+                    continue
+                n_lo, n_hi = rng
+                # n <= n_hi + M(1-a)
+                row = LinearExpr.of(nv, 1.0).add(av, M)
+                self.cons.add(row, "<=", float(n_hi) + M,
+                              ConstraintMeta("NRANGE",
+                                             f"wrap n upper {b.id}/{q}/{node}/{k}",
+                                             {"demand": b.id, "slot": str(q),
+                                              "node": node, "window": str(k)}))
+                # n >= n_lo - M(1-a)
+                row = LinearExpr.of(nv, 1.0).add(av, -M)
+                self.cons.add(row, ">=", float(n_lo) - M,
+                              ConstraintMeta("NRANGE",
+                                             f"wrap n lower {b.id}/{q}/{node}/{k}",
+                                             {"demand": b.id, "slot": str(q),
+                                              "node": node, "window": str(k)}))
+
     def _build_green_bands(self) -> None:
         # C4–C8：绿波带。
         # 绿波带是“一条连续的时间区间，沿链上每个路口都落在某个绿灯窗口内”。
@@ -916,29 +1055,42 @@ class ModelBuilder:
                 continue
             table = self.ctx.travel[b.id]
             d = b.direction
-            u = {q: self.vars.add(f"band[{b.id},{q}].u", 0.0, self.C, GVarType.CONTINUOUS,
+            # 按节点和窗口槽预计算 n 的可行整数范围，替代原来的全局保守界。
+            node_ranges: dict[int, dict[int, tuple[int, int] | None]] = {}
+            node_global: dict[int, tuple[int, int]] = {}
+            for j, node in enumerate(b.nodes):
+                ranges = self._green_wrap_bounds_for_node(node, d, table.cum_T_s[j])
+                node_ranges[j] = ranges
+                los = [v[0] for v in ranges.values() if v is not None]
+                his = [v[1] for v in ranges.values() if v is not None]
+                if los:
+                    node_global[j] = (min(0, min(los)), max(0, max(his)))
+                else:
+                    node_global[j] = (0, 0)
+            u = {q: self.vars.add(naming.gw_start(b.id, q), 0.0, self.C, GVarType.CONTINUOUS,
                                    {"kind": "band_start", "demand": b.id, "slot": q})
                  for q in range(1, qmax + 1)}
-            beta = {q: self.vars.add(f"band[{b.id},{q}].beta", 0.0, self.C, GVarType.CONTINUOUS,
+            beta = {q: self.vars.add(naming.gw_width(b.id, q), 0.0, self.C, GVarType.CONTINUOUS,
                                       {"kind": "band_width", "demand": b.id, "slot": q})
                     for q in range(1, qmax + 1)}
-            e = {q: self.vars.add(f"band[{b.id},{q}].e", 0.0, 1.0, GVarType.BINARY,
+            e = {q: self.vars.add(naming.gw_on(b.id, q), 0.0, 1.0, GVarType.BINARY,
                                    {"kind": "band_exists", "demand": b.id, "slot": q})
                  for q in range(1, qmax + 1)}
             a: dict[tuple[int, int, int], VarHandle] = {}
             n: dict[tuple[int, int], VarHandle] = {}
             for q in range(1, qmax + 1):
                 for j, node in enumerate(b.nodes):
-                    n[(q, j)] = self.vars.add(f"n[{b.id},{q},{node}]",
-                                              float(self._green_n_lower(node, d)),
-                                              float(table.n_max[j] + 2),
+                    lo_n, hi_n = node_global[j]
+                    n[(q, j)] = self.vars.add(naming.gw_cycle(b.id, q, node),
+                                              float(lo_n), float(hi_n),
                                               GVarType.INTEGER,
                                               {"kind": "wrap", "demand": b.id, "slot": q, "node": node})
                     for k in range(1, self.ctx.max_window_slots(node, d) + 1):
-                        a[(q, j, k)] = self.vars.add(f"asg[{b.id},{q},{node},{k}]", 0.0, 1.0,
+                        a[(q, j, k)] = self.vars.add(naming.gw_win(b.id, q, node, k), 0.0, 1.0,
                                                      GVarType.BINARY,
                                                      {"kind": "green_assignment", "demand": b.id,
                                                       "slot": q, "node": node, "window": k})
+                self._add_green_wrap_range_constraints(b, q, e, n, a, node_ranges, node_global)
             gmodel = GreenDemandModel(b, qmax, u, beta, e, a, n, table)
             self.meta.green[b.id] = gmodel
             self._add_band_slot_symmetry(b.id, qmax, e, beta, "green")
@@ -1076,7 +1228,7 @@ class ModelBuilder:
                     for side in ("s", "e"):
                         for j, node in enumerate(b.nodes):
                             for k in range(1, self.ctx.max_window_slots(node, d) + 1):
-                                var = self.vars.add(f"marg[{b.id},{q},{node},{k}].{side}", 0.0,
+                                var = self.vars.add(naming.margin_name(b.id, q, node, k, side), 0.0,
                                                     self.m.containment * 2.0, GVarType.CONTINUOUS,
                                                     {"kind": "margin_shortfall", "demand": b.id,
                                                      "slot": q, "node": node, "window": k, "side": side})
@@ -1139,35 +1291,48 @@ class ModelBuilder:
             self.meta.red[(down_node, d)] = red_down
 
             # 预剪枝：保留与某个对方槽位可能配对的 g 和 (r,k)。
-            ag_slots, ar_keys = self._red_compatible_keys(gw_up, red_down, tau)
+            # 上游周期下标 m 的可行范围按"上游绿窗槽"分别推导（与绿带 n 对称）。
+            m_ranges = self._red_upstream_wrap_bounds(gw_up, tau)
+            ag_slots, ar_keys = self._red_compatible_keys(gw_up, red_down, tau, m_ranges)
 
             qmax = self.ctx.demand_max_bands(
                 b, allow_sharing=self.problem.objective.allow_window_sharing)
-            u = {q: self.vars.add(f"red[{b.id},{q}].u", 0.0, self.C, GVarType.CONTINUOUS,
+            u = {q: self.vars.add(naming.rw_start(b.id, q), 0.0, self.C, GVarType.CONTINUOUS,
                                    {"kind": "red_band_start", "demand": b.id, "slot": q})
                  for q in range(1, qmax + 1)}
-            beta = {q: self.vars.add(f"red[{b.id},{q}].beta", 0.0, self.C, GVarType.CONTINUOUS,
+            beta = {q: self.vars.add(naming.rw_width(b.id, q), 0.0, self.C, GVarType.CONTINUOUS,
                                       {"kind": "red_band_width", "demand": b.id, "slot": q})
                     for q in range(1, qmax + 1)}
-            e = {q: self.vars.add(f"red[{b.id},{q}].e", 0.0, 1.0, GVarType.BINARY,
+            e = {q: self.vars.add(naming.rw_on(b.id, q), 0.0, 1.0, GVarType.BINARY,
                                    {"kind": "red_band_exists", "demand": b.id, "slot": q})
                  for q in range(1, qmax + 1)}
+
+            # 上游周期下标：与绿带的 n 对称，补上"上游项缺一个周期"那一维。
+            feasible_m = [v for v in (m_ranges.get(g) for g in ag_slots) if v is not None]
+            if feasible_m:
+                m_lb = float(min(0, min(v[0] for v in feasible_m)))
+                m_ub = float(max(0, max(v[1] for v in feasible_m)))
+            else:
+                m_lb = m_ub = 0.0
+            m_shift = {q: self.vars.add(naming.rw_up_cycle(b.id, q), m_lb, m_ub, GVarType.INTEGER,
+                                        {"kind": "red_up_wrap", "demand": b.id, "slot": q})
+                       for q in range(1, qmax + 1)}
 
             ag: dict[tuple[int, int], VarHandle] = {}
             ar: dict[tuple[int, int, int], VarHandle] = {}
             for q in range(1, qmax + 1):
                 for g in ag_slots:
                     ag[(q, g)] = self.vars.add(
-                        f"ag[{b.id},{q},{g}]", 0.0, 1.0, GVarType.BINARY,
+                        naming.rw_up_win(b.id, q, g), 0.0, 1.0, GVarType.BINARY,
                         {"kind": "red_up_assignment", "demand": b.id, "slot": q, "up_window": g})
                 for (r, k) in ar_keys:
                     ar[(q, r, k)] = self.vars.add(
-                        f"ar[{b.id},{q},{r},{k}]", 0.0, 1.0, GVarType.BINARY,
+                        naming.rw_down_win(b.id, q, r, k), 0.0, 1.0, GVarType.BINARY,
                         {"kind": "red_down_assignment", "demand": b.id, "slot": q,
                          "red_rid": r, "shift": k})
 
             rmodel = RedDemandModel(b, qmax, u, beta, e, ag, ar, gw_up, red_down,
-                                    ag_slots, ar_keys)
+                                    ag_slots, ar_keys, m_shift)
             self.meta.red_demands[b.id] = rmodel
             self._add_band_slot_symmetry(b.id, qmax, e, beta, "red")
 
@@ -1221,19 +1386,58 @@ class ModelBuilder:
                                   ConstraintMeta("C9", f"red ar<=redavail {b.id}/{q}/{r}/{k}",
                                                  {"demand": b.id, "slot": str(q)}))
 
-                # 上游两条包含约束，只挂 ag。
+                # 上游两条包含约束，只挂 ag。上游位置是 u - τ - φ_up - m·C，
+                # m 是上游周期下标（与绿带的 n 对称），补上"上游项缺一个周期"那一维。
+                mv = m_shift[q]
                 for g in ag_slots:
                     av = ag[(q, g)]
+                    rng = m_ranges.get(g)
+                    if rng is None:
+                        # 该上游窗口槽不存在任何可行 m，直接禁止使用。
+                        self.cons.add(LinearExpr.of(av, 1.0), "==", 0.0,
+                                      ConstraintMeta("MRANGE",
+                                                     f"red wrap infeasible {b.id}/{q}/{g}",
+                                                     {"demand": b.id, "slot": str(q),
+                                                      "up_window": str(g)}))
+                        continue
                     row = LinearExpr.of(u[q], 1.0).add(self.meta.phi[up_node], -1.0)
+                    row.add(mv, -self.C)
                     row.add(gw_up.s[g], -1.0).add(av, -M)
                     self.cons.add(row, ">=", tau - M,
                                   ConstraintMeta("C9", f"red up lower {b.id}/{q}/{g}",
                                                  {"demand": b.id, "slot": str(q)}))
                     row = LinearExpr.of(u[q], 1.0).add(beta[q], 1.0)
-                    row.add(self.meta.phi[up_node], -1.0).add(gw_up.e[g], -1.0).add(av, M)
+                    row.add(self.meta.phi[up_node], -1.0).add(mv, -self.C)
+                    row.add(gw_up.e[g], -1.0).add(av, M)
                     self.cons.add(row, "<=", tau + M,
                                   ConstraintMeta("C9", f"red up upper {b.id}/{q}/{g}",
                                                  {"demand": b.id, "slot": str(q)}))
+                    # m 的可行范围（按上游窗口槽）：只在选中该槽时生效。
+                    # 用**紧的** big-M（m 的跨度只有几），比全局 containment M
+                    # 强得多，能明显加强 LP 松弛。
+                    m_lo_g, m_hi_g = rng
+                    Mm = max(1.0, float(m_ub - m_lb)) + 1.0
+                    row = LinearExpr.of(mv, 1.0).add(av, Mm)
+                    self.cons.add(row, "<=", float(m_hi_g) + Mm,
+                                  ConstraintMeta("MRANGE",
+                                                 f"red wrap m upper {b.id}/{q}/{g}",
+                                                 {"demand": b.id, "slot": str(q),
+                                                  "up_window": str(g)}))
+                    row = LinearExpr.of(mv, 1.0).add(av, -Mm)
+                    self.cons.add(row, ">=", float(m_lo_g) - Mm,
+                                  ConstraintMeta("MRANGE",
+                                                 f"red wrap m lower {b.id}/{q}/{g}",
+                                                 {"demand": b.id, "slot": str(q),
+                                                  "up_window": str(g)}))
+                # e=0 时 m=0（与绿带 n 的处理一致）。
+                row = LinearExpr.of(mv, 1.0).add(e[q], -m_ub)
+                self.cons.add(row, "<=", 0.0,
+                              ConstraintMeta("MRANGE", f"red wrap m<=ub*e {b.id}/{q}",
+                                             {"demand": b.id, "slot": str(q)}))
+                row = LinearExpr.of(mv, 1.0).add(e[q], -m_lb)
+                self.cons.add(row, ">=", 0.0,
+                              ConstraintMeta("MRANGE", f"red wrap m>=lb*e {b.id}/{q}",
+                                             {"demand": b.id, "slot": str(q)}))
 
                 # C9_RED_EDGE：红波带边界与上游绿窗边界的距离损失/约束。
                 #
@@ -1253,7 +1457,7 @@ class ModelBuilder:
                         if start_spec is not None:
                             if start_spec.coef > 0:
                                 sigma_s = self.vars.add(
-                                    f"red_edge_start[{b.id},{q},{g}]", 0.0,
+                                    naming.rw_edge_start(b.id, q, g), 0.0,
                                     self.m.containment * 2.0, GVarType.CONTINUOUS,
                                     {"kind": "red_boundary_slack", "demand": b.id,
                                      "slot": q, "up_window": g, "side": "start"})
@@ -1261,6 +1465,7 @@ class ModelBuilder:
                                     rb_ref.start_vars.append(sigma_s)
                                 row = LinearExpr.of(sigma_s, 1.0).add(u[q], -1.0)
                                 row.add(self.meta.phi[up_node], 1.0).add(gw_up.s[g], 1.0)
+                                row.add(mv, self.C)
                                 row.add(av, -M_edge).add_const(tau)
                                 self.cons.add(row, ">=", -start_spec.free_s - M_edge,
                                               ConstraintMeta("C9_RED_EDGE",
@@ -1268,7 +1473,8 @@ class ModelBuilder:
                                                              {"demand": b.id, "slot": str(q)}))
                             if start_spec.hard_max_s is not None:
                                 row = LinearExpr.of(u[q], 1.0).add(self.meta.phi[up_node], -1.0)
-                                row.add(gw_up.s[g], -1.0).add(av, M_hard).add_const(-tau)
+                                row.add(gw_up.s[g], -1.0).add(mv, -self.C)
+                                row.add(av, M_hard).add_const(-tau)
                                 self.cons.add(row, "<=", start_spec.hard_max_s + M_hard,
                                               ConstraintMeta("C9_RED_EDGE_HARD",
                                                              f"red edge start max {b.id}/{q}/{g}",
@@ -1277,7 +1483,7 @@ class ModelBuilder:
                         if end_spec is not None:
                             if end_spec.coef > 0:
                                 sigma_e = self.vars.add(
-                                    f"red_edge_end[{b.id},{q},{g}]", 0.0,
+                                    naming.rw_edge_end(b.id, q, g), 0.0,
                                     self.m.containment * 2.0, GVarType.CONTINUOUS,
                                     {"kind": "red_boundary_slack", "demand": b.id,
                                      "slot": q, "up_window": g, "side": "end"})
@@ -1285,14 +1491,16 @@ class ModelBuilder:
                                     rb_ref.end_vars.append(sigma_e)
                                 row = LinearExpr.of(sigma_e, 1.0).add(u[q], 1.0)
                                 row.add(beta[q], 1.0).add(self.meta.phi[up_node], -1.0)
-                                row.add(gw_up.e[g], -1.0).add(av, -M_edge).add_const(-tau)
+                                row.add(gw_up.e[g], -1.0).add(mv, -self.C)
+                                row.add(av, -M_edge).add_const(-tau)
                                 self.cons.add(row, ">=", -end_spec.free_s - M_edge,
                                               ConstraintMeta("C9_RED_EDGE",
                                                              f"red edge end {b.id}/{q}/{g}",
                                                              {"demand": b.id, "slot": str(q)}))
                             if end_spec.hard_max_s is not None:
                                 row = LinearExpr.of(self.meta.phi[up_node], 1.0)
-                                row.add(gw_up.e[g], 1.0).add(u[q], -1.0).add(beta[q], -1.0)
+                                row.add(gw_up.e[g], 1.0).add(mv, self.C)
+                                row.add(u[q], -1.0).add(beta[q], -1.0)
                                 row.add(av, M_hard).add_const(tau)
                                 self.cons.add(row, "<=", end_spec.hard_max_s + M_hard,
                                               ConstraintMeta("C9_RED_EDGE_HARD",
@@ -1387,7 +1595,7 @@ class ModelBuilder:
 
             z_ub = max([_target_ub(band_models[did], g.target_for(did))
                         for did in g.demands] + [1.0])
-            z = self.vars.add(f"balance[{g.id}].z", 0.0, z_ub, GVarType.CONTINUOUS,
+            z = self.vars.add(naming.bal_min(g.id), 0.0, z_ub, GVarType.CONTINUOUS,
                               {"kind": "balanced_min_bandwidth", "group": g.id})
             y_vars: dict[str, VarHandle] = {}
             bw_exprs: dict[str, LinearExpr] = {}
@@ -1397,7 +1605,7 @@ class ModelBuilder:
                 bm = band_models[did]
                 target = g.target_for(did)
                 target_vars[did] = target
-                y = self.vars.add(f"balance[{g.id}].y[{did}]", 0.0, 1.0, GVarType.BINARY,
+                y = self.vars.add(naming.bal_present(g.id, did), 0.0, 1.0, GVarType.BINARY,
                                   {"kind": "balanced_demand_present", "group": g.id, "demand": did})
                 y_vars[did] = y
                 if bm is None:
@@ -1457,7 +1665,7 @@ class ModelBuilder:
             # 目标中减去 min_existing_penalty_s · deficit_g。
             deficit = None
             if policy == "skip" and g.min_existing is not None and g.min_existing > 0:
-                deficit = self.vars.add(f"balance[{g.id}].deficit", 0.0,
+                deficit = self.vars.add(naming.bal_deficit(g.id), 0.0,
                                         float(g.min_existing), GVarType.CONTINUOUS,
                                         {"kind": "balanced_min_existing_shortfall", "group": g.id})
                 row = LinearExpr.of(deficit, 1.0)
@@ -1487,7 +1695,7 @@ class ModelBuilder:
                 owner = c.soft.owner
                 M = self.m.soft + abs(rhs) + lhs.max_abs_atom_bound(3.0 * self.C) + 1.0
                 if c.sense in ("<=", "=="):
-                    sigma = self.vars.add(f"viol[{c.id}.pos]", 0.0, M, GVarType.CONTINUOUS,
+                    sigma = self.vars.add(naming.soft_slack(c.id, "pos"), 0.0, M, GVarType.CONTINUOUS,
                                           {"kind": "soft_violation"})
                     row = lhs.copy().add(sigma, -1.0)
                     self.cons.add(row, "<=", rhs,
@@ -1496,9 +1704,9 @@ class ModelBuilder:
                     self.meta.soft.append(SoftPenaltyRef(
                         constraint_id=c.id + (".pos" if c.sense == "==" else ""),
                         expr=lhs.copy(), sense="<=", rhs=rhs, coef=coef, owner=owner,
-                        label=f"viol[{c.id}.pos]"))
+                        label=naming.soft_slack(c.id, "pos")))
                 if c.sense in (">=", "=="):
-                    sigma = self.vars.add(f"viol[{c.id}.neg]", 0.0, M, GVarType.CONTINUOUS,
+                    sigma = self.vars.add(naming.soft_slack(c.id, "neg"), 0.0, M, GVarType.CONTINUOUS,
                                           {"kind": "soft_violation"})
                     row = lhs.copy().add(sigma, 1.0)
                     self.cons.add(row, ">=", rhs,
@@ -1507,7 +1715,7 @@ class ModelBuilder:
                     self.meta.soft.append(SoftPenaltyRef(
                         constraint_id=c.id + (".neg" if c.sense == "==" else ""),
                         expr=lhs.copy(), sense=">=", rhs=rhs, coef=coef, owner=owner,
-                        label=f"viol[{c.id}.neg]"))
+                        label=naming.soft_slack(c.id, "neg")))
 
 
 __all__ = ["ArterialModel", "ModelBuilder", "ref_label"]

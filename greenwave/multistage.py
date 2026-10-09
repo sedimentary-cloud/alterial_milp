@@ -16,6 +16,14 @@
 核心技巧是把所有组合变量固定后，MILP 退化成 LP；固定边界后，窗口
 端点都变成常数，组合搜索也大幅缩小。它不是全局最优，但适合大规模
 快速 incumbent、超时 fallback 和多起点搜索。
+
+Stage 1 还带一个**语义子问题分解**（:mod:`greenwave.stage1_decompose`）：
+δ 固定后，如果优化目标全是"局部"的带（例如所有需求都只跨相邻两三个
+路口），模型里唯一被多条带共用的自由变量只有路口偏置 φ，而 φ 只是
+公共平移（gauge）。此时按共享路口把需求切成若干组分别求解，再把各组的
+相对偏置串起来，就是**精确**分解（全局最优 = Σ 组最优），分解出来的解
+还会代回整模逐行校验，校验不过就回退整模 MIP。细节见
+:mod:`greenwave.stage1_decompose`。
 """
 from __future__ import annotations
 
@@ -27,14 +35,17 @@ from typing import Iterable, Mapping
 from .errors import GWModelError
 from .heuristic.greedy import ConstructedBand, GreedyConstructor, GreedySolution
 from .model.builder import ArterialModel, ModelBuilder
-from .model.constraints import ConstraintMeta, ConstraintStore
+from .model.constraints import ConstraintMeta
 from .model.expressions import LinearExpr
-from .model.variables import GVarType, VarHandle, VariableRegistry
+from .model.variables import GVarType, VarHandle
 from .preprocess.context import GridPointContext
 from .report.solution import SolutionDecoder, SolutionRecord
 from .schema.models import ProblemInput
 from .solve import make_backend
 from .solve.backend_base import SolveOptions, SolveResult, SolveStatus
+from .stage1_decompose import (DecomposeOutcome, plan_dp_candidate,
+                               probe_first_subproblem, solve_stage1_decomposed,
+                               solve_stage1_plan_dp)
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +64,8 @@ class PriorBand:
     windows: Mapping[str, int] = field(default_factory=dict)
     wraps: Mapping[str, int] = field(default_factory=dict)
     red_instance: tuple[int, int, int] | None = None
+    # 红带上游周期下标 m（与绿带的 n 对称），stage-2 里也要固定。
+    red_up_wrap: int = 0
 
 
 @dataclass(frozen=True)
@@ -107,6 +120,19 @@ class MultistageResult:
     stage1_time_s: float = 0.0
     stage2_time_s: float = 0.0
     stage_records: tuple[StageTimeRecord, ...] = ()
+    # 每次 Stage-1 实际走的路径（"语义分解" / "方案枚举DP" / "整模"）；用于
+    # benchmark 报告"分阶段到底用了哪条路"，避免只看时间猜路径。
+    stage1_paths: tuple[str, ...] = ()
+
+
+def stage1_path_label(message: str | None) -> str:
+    """把 Stage-1 的 message 归类成一条可读路径标签。"""
+    msg = message or ""
+    if "plan-enumeration DP" in msg:
+        return "方案枚举DP"
+    if "decomposed into" in msg:
+        return "语义分解"
+    return "整模"
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +158,7 @@ def _band_from_constructed(band: ConstructedBand) -> PriorBand | None:
         windows={str(k): int(v) for k, v in dict(band.windows).items()},
         wraps={str(k): int(v) for k, v in dict(getattr(band, "wraps", {})).items()},
         red_instance=red_instance,
+        red_up_wrap=int(getattr(band, "red_up_wrap", 0) or 0),
     )
 
 
@@ -258,6 +285,8 @@ def validate_prior(problem: ProblemInput, ctx: GridPointContext,
                 issues.append(f"{did}/{slot}: downstream red slot {r} out of range 1..{max_red_slot}")
             if k < -10 or k > 10:
                 issues.append(f"{did}/{slot}: downstream period shift k={k} looks out of range")
+            if not (-10 <= int(band.red_up_wrap) <= 10):
+                issues.append(f"{did}/{slot}: upstream period shift m={band.red_up_wrap} looks out of range")
     return tuple(issues)
 
 
@@ -291,7 +320,13 @@ def _is_fixed_var(model: ArterialModel, idx: int, tol: float = 1e-9) -> bool:
 
 
 def find_stage1_components(model: ArterialModel, *, tol: float = 1e-9) -> tuple[tuple[int, ...], ...]:
-    """按变量-约束耦合图求 Stage-1 的连通分量。
+    """按变量-约束耦合图求连通分量（**结构诊断用**）。
+
+    Stage-1 的分解现在走 :mod:`greenwave.stage1_decompose` 的语义分组：
+    先按"需求之间是否共享路口"切组，再按跨带约束并组，最后把拼出来的解代回
+    整模校验。本函数只保留为诊断工具——注意它会把通过公共 φ 串起来的、在
+    物理上互不干涉的带也算成一个分量（φ 只是 gauge），所以它的分量数会
+    明显小于语义分组数。
 
     关键约定：**固定变量视为常数，不作为图的顶点。** 如果某个固定变量出现在
     一条约束里，它只能把常数项移到右边，不能把两个自由变量错误地连在一起。
@@ -327,58 +362,6 @@ def find_stage1_components(model: ArterialModel, *, tol: float = 1e-9) -> tuple[
     for idx in free:
         groups.setdefault(find(idx), []).append(idx)
     return tuple(tuple(sorted(v)) for v in groups.values())
-
-
-def _component_model(model: ArterialModel, component: tuple[int, ...]) -> ArterialModel:
-    """把完整 Stage-1 模型沿一个连通分量切片成独立子模型。
-
-    固定变量被替换为常数项，不进入局部变量表；这与建图阶段的
-    “固定变量视为常数”保持一致。
-    """
-    local_vars = VariableRegistry()
-    local_map: dict[int, VarHandle] = {}
-    for full_idx in component:
-        name = model.vars.names[full_idx]
-        meta = model.vars.metas[full_idx]
-        local = local_vars.add(name, model.vars.lbs[full_idx], model.vars.ubs[full_idx],
-                               model.vars.types[full_idx], meta)
-        local_map[full_idx] = local
-
-    def local_expr(expr: LinearExpr, context: str, *, skip_foreign: bool = False) -> LinearExpr:
-        out = LinearExpr.constant(float(expr.const))
-        for full_idx, coef in expr.items():
-            if full_idx in local_map:
-                out.add(local_map[full_idx], coef)
-            elif _is_fixed_var(model, full_idx):
-                # 固定变量视为常数，不进入局部变量表。
-                out.add_const(coef * model.vars.lbs[full_idx])
-            elif skip_foreign:
-                # 目标函数按变量可加；其他分量/孤立变量在目标里单独处理。
-                continue
-            else:
-                raise GWModelError(
-                    f"{context}: cross-component variable {model.vars.names[full_idx]!r} detected")
-        return out
-
-    local_cons = ConstraintStore()
-    for row in model.cons.rows:
-        # 完全不涉及当前分量的约束直接跳过；涉及两个分量的约束说明建图漏了边。
-        if not any(idx in local_map for idx, _coef in row.expr.items()):
-            continue
-        expr = local_expr(row.expr, f"constraint {row.meta.label}")
-        if expr.is_constant():
-            c = expr.const
-            if row.sense == "<=" and c > row.rhs + 1e-7:
-                raise GWModelError(f"fixed row infeasible: {row.meta.label}")
-            if row.sense == ">=" and c < row.rhs - 1e-7:
-                raise GWModelError(f"fixed row infeasible: {row.meta.label}")
-            if row.sense == "==" and abs(c - row.rhs) > 1e-7:
-                raise GWModelError(f"fixed row infeasible: {row.meta.label}")
-            continue
-        local_cons.add(expr, row.sense, row.rhs, row.meta)
-
-    objective = local_expr(model.objective or LinearExpr(), "objective", skip_foreign=True)
-    return ArterialModel(local_vars, local_cons, objective, model.objective_sense, model.meta)
 
 
 def freeze_combo(model: ArterialModel, prior: PriorSolution) -> None:
@@ -469,6 +452,9 @@ def freeze_combo(model: ArterialModel, prior: PriorSolution) -> None:
                     h = rm.ar.get((q, rr, kk))
                     if h is not None:
                         _fix_checked(model, h, 1.0 if (rr, kk) == (r, k) else 0.0)
+                m_var = rm.m_shift.get(q)
+                if m_var is not None:
+                    _fix_checked(model, m_var, int(pb.red_up_wrap))
             else:
                 _fix_checked(model, rm.e[q], 0.0)
                 if q in rm.beta:
@@ -483,6 +469,9 @@ def freeze_combo(model: ArterialModel, prior: PriorSolution) -> None:
                     h = rm.ar.get((q, r, k))
                     if h is not None:
                         _fix_checked(model, h, 0.0)
+                m_var = rm.m_shift.get(q)
+                if m_var is not None:
+                    _fix_checked(model, m_var, 0)
 
     # 4) 均衡组的 y = OR(e)：先验组合已经决定了存在需求。
     for gid, bgm in meta.balanced.items():
@@ -528,74 +517,58 @@ def _solve_options(time_limit_s: float, mip_rel_gap: float = 0.0) -> SolveOption
     return SolveOptions(time_limit_s=float(time_limit_s), mip_rel_gap=float(mip_rel_gap))
 
 
-def _component_is_nontrivial(model: ArterialModel, component: tuple[int, ...],
-                            *, tol: float = 1e-9) -> bool:
-    """分量是否含至少一个有效约束或非零目标项。"""
-    comp_set = set(component)
-    for row in model.cons.rows:
-        if any(idx in comp_set and abs(coef) > tol for idx, coef in row.expr.items()):
-            return True
-    obj = model.objective or LinearExpr()
-    return any(idx in comp_set and abs(coef) > tol for idx, coef in obj.items())
-
-
-def _solve_decomposed_stage1(
-    model: ArterialModel,
+def _solve_stage1_dp_with_probe(
     problem: ProblemInput,
     ctx: GridPointContext,
-    components: tuple[tuple[int, ...], ...],
+    model: ArterialModel,
+    dp_plan,
     *,
-    time_limit_s: float,
-    mip_rel_gap: float,
-) -> tuple[SolutionRecord, PriorSolution, ArterialModel, SolveResult] | None:
-    """按变量-约束连通分量分别求解 Stage-1 子问题。
+    adjustments_r: Mapping[tuple[str, str, int], float],
+    symmetry: bool,
+    min_band_width_s: float,
+    stage_limit: float,
+    stage_gap: float,
+    probe_s: float,
+):
+    """方案枚举+DP 的收益判定与执行。
 
-    返回 None 表示分解路径失败，调用方应回退整模 MIP。
+    判定逻辑（先估、再短试探、最后兜底）：
+    1. 先跑 DP 的第一个子问题，实测单次子问题耗时 -> 估 ``t_dp = n_solves × t_sub``；
+    2. ``t_dp`` 不超过 ``probe_s`` 就直接做 DP（预估已很便宜）；
+    3. 否则先给整模一个 ``probe_s`` 的短预算——若它在预算内就证到 optimal，
+       直接用整模（大概率更快）；否则做 DP（精确解）兜底。
     """
-    backend = make_backend(problem.solver.backend)
-    n = len(model.vars)
-    full_values: list[float] = [float(model.vars.lbs[i]) for i in range(n)]
-    total_time = 0.0
-    parts: list[str] = []
-    for comp in components:
-        local_model = _component_model(model, comp)
-        if len(local_model.vars) == 0:
-            continue
-        if len(local_model.cons.rows) == 0:
-            # 无约束分量：直接取目标改善方向的边界，避免为无用变量创建子问题。
-            obj_items = dict(local_model.objective.items())
-            for local_idx, full_idx in enumerate(comp):
-                coef = float(obj_items.get(local_idx, 0.0))
-                lo = float(model.vars.lbs[full_idx])
-                hi = float(model.vars.ubs[full_idx])
-                if model.objective_sense == "max":
-                    full_values[full_idx] = hi if coef > 0 else lo
-                else:
-                    full_values[full_idx] = lo if coef > 0 else hi
-            parts.append(f"{len(comp)}vars/trivial")
-            continue
-        session = backend.create(local_model)
-        backend.set_objective(session, local_model.objective or LinearExpr(),
-                              model.objective_sense)
-        res = backend.solve(session, _solve_options(time_limit_s, mip_rel_gap))
-        total_time += float(res.time_s)
-        if res.values is None:
-            return None
-        for local_idx, full_idx in enumerate(comp):
-            full_values[full_idx] = float(res.values[local_idx])
-        parts.append(f"{len(comp)}vars/{res.status.value}")
+    budget = min(float(probe_s), float(stage_limit)) if probe_s > 0 else 0.0
+    t_sub, cache = probe_first_subproblem(
+        problem, ctx, dp_plan, adjustments_r=adjustments_r, symmetry=symmetry,
+        min_band_width_s=min_band_width_s, time_limit_s=stage_limit,
+        mip_rel_gap=stage_gap)
 
-    sol = SolutionDecoder(model).decode(full_values)
-    prior = extract_prior(sol, problem, ctx, source="stage1-decomposed")
-    res = SolveResult(
-        status=SolveStatus.OPTIMAL,
-        objective=float(sol.composite_s),
-        values=None,
-        bound=None,
-        time_s=total_time,
-        message=f"stage1 decomposed into {len(parts)} components: {', '.join(parts)}",
-    )
-    return sol, prior, model, res
+    if t_sub is not None and t_sub > 0 and budget > 0:
+        t_est = float(dp_plan.n_solves) * t_sub
+        if t_est > budget:
+            probe = _solve_model_once(problem, model, min(budget, stage_limit), stage_gap)
+            if probe is not None and probe[1].status == SolveStatus.OPTIMAL:
+                sol, res = probe
+                return DecomposeOutcome(
+                    solution=sol, result=res, groups=tuple(dp_plan.groups),
+                    group_times_s=(float(res.time_s),))
+
+    return solve_stage1_plan_dp(
+        problem, ctx, model, plan=dp_plan, adjustments_r=adjustments_r,
+        symmetry=symmetry, min_band_width_s=min_band_width_s,
+        time_limit_s=stage_limit, mip_rel_gap=stage_gap, cache=cache)
+
+
+def _solve_model_once(problem: ProblemInput, model: ArterialModel,
+                      time_limit_s: float, mip_rel_gap: float):
+    backend = make_backend(problem.solver.backend)
+    session = backend.create(model)
+    backend.set_objective(session, model.expr_composite(), "max")
+    res = backend.solve(session, _solve_options(time_limit_s, mip_rel_gap))
+    if res.values is None:
+        return None
+    return SolutionDecoder(model).decode(res.values), res
 
 
 def solve_fixed_boundaries(
@@ -627,18 +600,42 @@ def solve_fixed_boundaries(
                  else problem.solver.mip_rel_gap)
 
     if use_decompose:
-        components = find_stage1_components(model)
-        nontrivial = [c for c in components if _component_is_nontrivial(model, c)]
-        min_size = max(1, int(problem.solver.multistage.decompose_min_component_size))
-        large = [c for c in nontrivial if len(c) >= min_size]
-        if len(large) > 1:
-            decomposed = _solve_decomposed_stage1(
-                model, problem, ctx, components,
-                time_limit_s=stage_limit, mip_rel_gap=stage_gap,
-            )
-            if decomposed is not None:
-                return decomposed
-            # 分解失败则继续走下面的整模 MIP。
+        outcome = solve_stage1_decomposed(
+            problem, ctx, model,
+            adjustments_r=adjustments_r,
+            symmetry=use_symmetry,
+            min_band_width_s=min_width,
+            time_limit_s=stage_limit,
+            mip_rel_gap=stage_gap,
+            min_group_size=max(1, int(problem.solver.multistage.decompose_min_component_size)),
+        )
+        if outcome is not None:
+            prior = extract_prior(outcome.solution, problem, ctx,
+                                  source="stage1-decomposed")
+            return outcome.solution, prior, model, outcome.result
+
+        # 上面这条路要求"共享路口单方案"。共享路口是多方案时会并成 1 组，
+        # 这时试"方案枚举 + 链式 DP"：固定方案后分解依旧精确，DP 只在方案
+        # 指派这一维上搜索，代价 Σ_g Π_{i∈g}|P_i| 次子问题求解。
+        if cfg_ms.decompose_dp:
+            dp_plan = plan_dp_candidate(
+                problem, ctx,
+                max_solves=int(cfg_ms.decompose_dp_max_solves))
+            if dp_plan is not None:
+                outcome = _solve_stage1_dp_with_probe(
+                    problem, ctx, model, dp_plan,
+                    adjustments_r=adjustments_r,
+                    symmetry=use_symmetry,
+                    min_band_width_s=min_width,
+                    stage_limit=stage_limit,
+                    stage_gap=stage_gap,
+                    probe_s=float(cfg_ms.decompose_dp_probe_s),
+                )
+                if outcome is not None:
+                    prior = extract_prior(outcome.solution, problem, ctx,
+                                          source="stage1-plan-dp")
+                    return outcome.solution, prior, model, outcome.result
+        # 都不适用 -> 继续走下面的整模 MIP。
 
     backend = make_backend(problem.solver.backend)
     session = backend.create(model)
@@ -718,14 +715,20 @@ def solve_fixed_combo_lp(
 
 def _initial_adjustment_starts(problem: ProblemInput, ctx: GridPointContext,
                                restarts: int) -> list[dict[tuple[str, str, int], float]]:
-    starts: list[dict[tuple[str, str, int], float]] = [{}]
-    witness = _witness_values(ctx)
+    # 初始 start 优先使用每个方案自己的可行性 witness δ。
+    # 这样即使某个方案必须依赖非零边界微调才可行，Stage-1 也不会被
+    # 默认的 δ=0 直接判死。
+    witness = {k: float(v) for k, v in _witness_values(ctx).items()
+               if abs(float(v)) > 1e-12}
+    starts: list[dict[tuple[str, str, int], float]] = []
     if witness:
         starts.append(dict(witness))
+    starts.append({})
     if problem.solver.heuristic.enabled:
         try:
             greedy = GreedyConstructor(problem, ctx).run()
-            starts.append({tuple(k): float(v) for k, v in greedy.adjustments_r.items()})
+            starts.append({tuple(k): float(v) for k, v in greedy.adjustments_r.items()
+                           if abs(float(v)) > 1e-12})
         except Exception:
             pass
 
@@ -782,6 +785,7 @@ def solve_multistage(
     stage1_time = 0.0
     stage2_time = 0.0
     stage_records: list[StageTimeRecord] = []
+    stage1_paths: list[str] = []
 
     stage1_limit = cfg.stage1_time_limit_s
     stage2_limit = cfg.stage2_time_limit_s
@@ -789,12 +793,17 @@ def solve_multistage(
     for start_idx, adjustments in enumerate(starts):
         t_stage = time.perf_counter()
         s1 = solve_fixed_boundaries(problem, ctx, adjustments,
-                                    time_limit_s=stage1_limit)
+                                    time_limit_s=stage1_limit,
+                                    decompose=cfg.decompose_stage1,
+                                    symmetry_breaking=cfg.stage1_symmetry_breaking,
+                                    min_band_width_s=cfg.stage1_min_band_width_s)
         dt_stage = time.perf_counter() - t_stage
         stage1_time += dt_stage
         stage_records.append(StageTimeRecord(
             start_idx=start_idx, round_idx=0, stage="stage1", time_s=dt_stage,
             objective=None if s1 is None else float(s1[0].composite_s)))
+        if s1 is not None:
+            stage1_paths.append(stage1_path_label(s1[3].message))
         if s1 is None:
             messages.append(f"start{start_idx}: stage1 no solution")
             continue
@@ -828,13 +837,18 @@ def solve_multistage(
             # 用 Stage 2 的 φ/δ 再跑一次 Stage 1，继续更新组合。
             t_stage = time.perf_counter()
             s1b = solve_fixed_boundaries(problem, ctx, cur_prior.adjustments_r,
-                                         time_limit_s=stage1_limit)
+                                         time_limit_s=stage1_limit,
+                                         decompose=cfg.decompose_stage1,
+                                         symmetry_breaking=cfg.stage1_symmetry_breaking,
+                                         min_band_width_s=cfg.stage1_min_band_width_s)
             dt_stage = time.perf_counter() - t_stage
             stage1_time += dt_stage
             stage_records.append(StageTimeRecord(
                 start_idx=start_idx, round_idx=round_idx, stage="stage1",
                 time_s=dt_stage,
                 objective=None if s1b is None else float(s1b[0].composite_s)))
+            if s1b is not None:
+                stage1_paths.append(stage1_path_label(s1b[3].message))
             if s1b is None:
                 break
             sol1b, prior1b, _m1b, _r1b = s1b
@@ -858,6 +872,7 @@ def solve_multistage(
             message="; ".join(messages) or "multistage found no feasible solution",
             stage1_time_s=stage1_time, stage2_time_s=stage2_time,
             stage_records=tuple(stage_records),
+            stage1_paths=tuple(stage1_paths),
         )
     msg = (f"multistage heuristic: rounds={total_rounds}, starts={len(starts)}, "
            f"stage1={stage1_time:.3f}s, stage2={stage2_time:.3f}s")
@@ -874,6 +889,7 @@ def solve_multistage(
         stage1_time_s=stage1_time,
         stage2_time_s=stage2_time,
         stage_records=tuple(stage_records),
+        stage1_paths=tuple(stage1_paths),
     )
 
 
@@ -883,4 +899,5 @@ __all__ = [
     "freeze_combo", "freeze_boundaries", "unfixed_integrality",
     "find_stage1_components",
     "solve_fixed_boundaries", "solve_fixed_combo_lp", "solve_multistage",
+    "stage1_path_label",
 ]

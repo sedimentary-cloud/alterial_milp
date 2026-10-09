@@ -291,7 +291,7 @@ class TestDocumentCases(unittest.TestCase):
         ctx = FeasibilityFilter(problem).filter(90.0, 1.0)
         model = ModelBuilder(problem, ctx).build()
         # v2: the two half-cycle copies share one declared boundary delta.
-        self.assertEqual(sum(1 for v in model.vars if v.name.startswith("bd[I1_P1,up")), 1)
+        self.assertEqual(sum(1 for v in model.vars if v.name.startswith("bnd_delta[I1_P1,up")), 1)
         backend = make_backend("scipy")
         session = backend.create(model)
         backend.set_objective(session, model.expr_composite(), "max")

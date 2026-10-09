@@ -103,6 +103,9 @@ class RedDemandModel:
     red_down: RedWindowSet
     ag_slots: tuple[int, ...]
     ar_keys: tuple[tuple[int, int], ...]  # (r,k)
+    # 上游周期下标 m（每个带槽一个），与绿带的 n 对称：
+    # 上游行是 s_g ≤ u - τ - φ_up - m·C ≤ e_g。
+    m_shift: dict[int, VarHandle] = field(default_factory=dict)
 
 
 # 整个模型的元数据总表。

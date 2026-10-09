@@ -45,7 +45,13 @@ BAND_EDGE_LINEWIDTH = 0.4
 class TimeSpaceDiagram:
     @staticmethod
     def render(solution, problem, ctx, out_path: str, title: str | None = None,
-               n_cycles: int | None = None) -> None:
+               n_cycles: int | None = None, title_font=None) -> None:
+        """画时距图。
+
+        ``title_font``：可选的 ``matplotlib.font_manager.FontProperties``。
+        标题要写中文时传它（本机不一定装了 CJK 字体，交给调用方决定）；
+        不传就沿用 matplotlib 默认字体。
+        """
         C = float(ctx.cycle_s)
         corridor = problem.corridor
         names = list(corridor.intersections)
@@ -236,7 +242,8 @@ class TimeSpaceDiagram:
         ax.set_yticklabels(names)
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Distance (m)")
-        ax.set_title(title or f"Time-Space Diagram (Cycle {C:.0f}s)", fontsize=12)
+        ax.set_title(title or f"Time-Space Diagram (Cycle {C:.0f}s)", fontsize=12,
+                     fontproperties=title_font)
         ax.grid(alpha=0.30, zorder=0)
         ax.xaxis.set_major_locator(MultipleLocator(C))
         ax.xaxis.set_minor_locator(MultipleLocator(C / 4.0))

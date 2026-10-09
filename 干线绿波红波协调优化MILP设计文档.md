@@ -809,7 +809,7 @@ tests/
 1. **单位后缀强制**：秒 `_s`、周期比例 `_r`、米 `_m`、米每秒 `_mps`。字段、变量、方法名一律遵守，禁止无量纲暗示的名字（如 `start`、`width`）出现在公共接口；
 2. **schema 对象不可变**：全部 pydantic `frozen=True`；`GridPointContext` 为 frozen dataclass；求解期对象（`ArterialModel`、`SolveResult`）可变性按本章定义；
 3. **变量命名规范**（用于调试、日志、诊断）：
-   `x[I1,P1]`、`phi[I2]`、`win[I2,up,1].s` / `.e` / `.h`、`adj[I2_P1,up,0,end]`、`band[GW_up,1].u` / `.beta` / `.e`、`asg[GW_up,1,I2,2]`、`n[GW_up,1,I2]`、`marg[GW_up,1,I2].s` / `.e`、`red[RW_12,1].u` / `.beta` / `.e`、`asgR[RW_12,1,g1,r2,k0]`、`viol[c7]`；
+   `plan_on[I1,P1]`、`offset[I2]`、`win_avail[I2,up,1]`（窗口端点本身是表达式，不是变量）、`bnd_delta[I2_P1,up,0]` / `bnd_xdelta[I2_P1,up,0]`、`gw_start[GW_up,1]` / `gw_width[GW_up,1]` / `gw_on[GW_up,1]`、`gw_win[GW_up,1,I2,2]`、`gw_cycle[GW_up,1,I2]`、`gw_margin_lo[GW_up,1,I2,1]` / `gw_margin_hi[GW_up,1,I2,1]`、`rw_start[RW_12,1]` / `rw_width[RW_12,1]` / `rw_on[RW_12,1]`、`rw_up_win[RW_12,1,g1]` / `rw_down_win[RW_12,1,r2,k0]`、`soft_slack[c7.pos]`（命名统一由 `greenwave/model/naming.py` 生成）；
 4. **错误体系**：`GWValidationError`（输入校验，携带 V 编号）、`GWInfeasibleGridPoint`（格点不可行，携带诊断记录，由 GridRunner 捕获而非上抛）、`GWModelError`（建模内部错误）、`GWSolveError`（求解器层错误）；
 5. **日志**：`logging.getLogger("greenwave.<module>")`；格点级日志必须带 `cycle_s / kappa` context 字段；
 6. **pydantic 校验器只查静态合法性**（V1–V10）；**格点相关可行性一律在 preprocess 层判定**，不混入 schema。

@@ -1004,6 +1004,13 @@ class MultistageConfig:
     decompose_stage1: bool = True
     # 至少要有两个规模达到该阈值的独立分量，才真正启用分解。
     decompose_min_component_size: int = 2
+    # Stage-1 的"方案枚举 + 链式 DP"（多方案路口）：固定方案后问题可分解，
+    # 于是按语义组枚举方案组合、再沿走廊做链式 DP。
+    decompose_dp: bool = True
+    # 枚举+DP 的子问题求解次数上限（Σ_g Π_{i∈g}|P_i|），超过就放弃 DP 走整模。
+    decompose_dp_max_solves: int = 400
+    # 预估 DP 耗时超过该秒数时，先用同样的短预算试一次整模，证到最优就用整模。
+    decompose_dp_probe_s: float = 1.0
     # Stage-1 是否启用 band slot 对称破缺与正宽度下界。
     stage1_symmetry_breaking: bool = True
     stage1_min_band_width_s: float = 1.0
@@ -1028,6 +1035,10 @@ class MultistageConfig:
             fallback_to_full_milp=bool(obj.get("fallback_to_full_milp", True)),
             decompose_stage1=bool(obj.get("decompose_stage1", True)),
             decompose_min_component_size=int(obj.get("decompose_min_component_size", 2)),
+            decompose_dp=bool(obj.get("decompose_dp", True)),
+            decompose_dp_max_solves=int(obj.get("decompose_dp_max_solves", 400)),
+            decompose_dp_probe_s=_num(obj.get("decompose_dp_probe_s", 1.0),
+                                      "decompose_dp_probe_s"),
             stage1_symmetry_breaking=bool(obj.get("stage1_symmetry_breaking", True)),
             stage1_min_band_width_s=_num(obj.get("stage1_min_band_width_s", 1.0),
                                          "stage1_min_band_width_s"),

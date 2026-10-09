@@ -35,6 +35,8 @@ class ConstructedBand:
     start_s: float
     windows: Mapping[str, int] = field(default_factory=dict)
     red_instance: tuple[int, ...] | None = None
+    # 红带上游周期下标 m（与绿带的 n 对称）：s_g ≤ u - τ - φ_up - m·C ≤ e_g。
+    red_up_wrap: int = 0
     # (demand, slot, node) -> 回绕周期 n。SolutionDecoder/GreedyConstructor 都写入。
     wraps: Mapping[str, int] = field(default_factory=dict)
 
