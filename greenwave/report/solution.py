@@ -55,6 +55,8 @@ class SolutionRecord:
     # loss_s 已经是路口损失的正值。
     band_reward_s: float = 0.0
     margin_loss_s: float = 0.0
+    # 绿波边界亲和损失（贴合损失）：带端离绿窗对应端点超出 free_s 的部分 × coef。
+    green_edge_loss_s: float = 0.0
 
 
 def _violation(ref: SoftPenaltyRef, values: np.ndarray) -> float:
@@ -212,7 +214,7 @@ class SolutionDecoder:
             for b in meta.problem.objective.band_demands:
                 if b.id == band.demand:
                     reward += b.weight * band.width_s
-        margin_pen = self._actual_margin_penalty(values, bands)
+        margin_pen, green_edge_pen = self._actual_green_penalties(values, bands)
 
         # 红波边界亲和损失：直接从 slack 变量值读取，目标里已最小化它们。
         red_boundary_pen = 0.0
@@ -243,22 +245,36 @@ class SolutionDecoder:
                     and gm.deficit is not None and pen > 0):
                 balanced_reward -= pen * float(values[gm.deficit.index])
 
-        composite = reward - margin_pen - composite_soft + balanced_reward - red_boundary_pen
+        composite = (reward - margin_pen - green_edge_pen - composite_soft
+                     + balanced_reward - red_boundary_pen)
         return SolutionRecord(dict(selection), offsets, adjustments, tuple(bands),
                               tuple(violations), float(composite), float(loss),
                               balanced_values, boundaries_r, derived_windows,
-                              float(reward), float(margin_pen))
+                              float(reward), float(margin_pen), float(green_edge_pen))
 
     # ------------------------------------------------------------------
-    def _actual_margin_penalty(self, values: np.ndarray, bands) -> float:
+    def _actual_green_penalties(self, values: np.ndarray, bands) -> tuple[float, float]:
+        """按解码后的几何位置重算绿波两项损失：margin 短缺 与 边界亲和。
+
+        为什么不用求解器里的松弛变量？
+        - 两项的 slack 都挂在 ``a``（窗口选择）上，未选中窗口的 slack
+          可能与当前方案无关，直接读会算出幻影罚；
+        - 这里按 ``band.start_s`` + 窗口端点 + 回绕整数 ``n`` 重新算，
+          与建模器里的公式一一对应（单一事实来源）。
+        """
         meta = self.model.meta
-        total = 0.0
+        margin_total = 0.0
+        edge_total = 0.0
         for band in bands:
             b = meta.problem.demand(band.demand)
             if b.type != "green":
                 continue
             margin = meta.problem.margin_for(b)
-            if margin.delta_min_s <= 0 or margin.coef <= 0:
+            gb = meta.problem.green_boundary_for(b)
+            use_margin = margin.delta_min_s > 0 and margin.coef > 0
+            use_edge = gb.enabled and ((gb.start is not None and gb.start.coef > 0)
+                                       or (gb.end is not None and gb.end.coef > 0))
+            if not use_margin and not use_edge:
                 continue
             gm = meta.green[b.id]
             table = gm.table
@@ -272,15 +288,23 @@ class SolutionDecoder:
                 e = phi + ew.e[k].evaluate(values)
                 band_lo = band.start_s + table.cum_T_s[j]
                 band_hi = band_lo + band.width_s
-                n = round((band_lo - s) / self.model.meta.cycle_s)
+                n = round((band_lo - s) / meta.cycle_s)
                 for nn in (n - 1, n, n + 1):
-                    ss = s + nn * self.model.meta.cycle_s
-                    ee = e + nn * self.model.meta.cycle_s
+                    ss = s + nn * meta.cycle_s
+                    ee = e + nn * meta.cycle_s
                     if band_lo >= ss - 1e-7 and band_hi <= ee + 1e-7:
-                        total += margin.coef * max(0.0, margin.delta_min_s - (band_lo - ss))
-                        total += margin.coef * max(0.0, margin.delta_min_s - (ee - band_hi))
+                        gap_lo = band_lo - ss
+                        gap_hi = ee - band_hi
+                        if use_margin:
+                            margin_total += margin.coef * max(0.0, margin.delta_min_s - gap_lo)
+                            margin_total += margin.coef * max(0.0, margin.delta_min_s - gap_hi)
+                        if use_edge:
+                            if gb.start is not None and gb.start.coef > 0:
+                                edge_total += gb.start.coef * max(0.0, gap_lo - gb.start.free_s)
+                            if gb.end is not None and gb.end.coef > 0:
+                                edge_total += gb.end.coef * max(0.0, gap_hi - gb.end.free_s)
                         break
-        return total
+        return margin_total, edge_total
 
 
 # 报告组装器：把内部结果拼成对外 JSON。
@@ -301,12 +325,17 @@ class ReportBuilder:
                 "message": r.message,
                 "bandwidth_objective_s": r.band_reward_s,
                 "negative_margin_loss_s": None if r.margin_loss_s is None else -r.margin_loss_s,
+                "negative_green_edge_loss_s": (
+                    None if r.green_edge_loss_s is None else -r.green_edge_loss_s),
                 "negative_intersection_loss_s": None if r.intersection_loss_s is None else -r.intersection_loss_s,
                 # 归一化版本：除以周期 C，单位变成“周期比例”，可跨周期比较。
                 "bandwidth_objective_ratio": (
                     None if r.band_reward_s is None or r.cycle_s <= 0 else r.band_reward_s / r.cycle_s),
                 "negative_margin_loss_ratio": (
                     None if r.margin_loss_s is None or r.cycle_s <= 0 else -r.margin_loss_s / r.cycle_s),
+                "negative_green_edge_loss_ratio": (
+                    None if r.green_edge_loss_s is None or r.cycle_s <= 0
+                    else -r.green_edge_loss_s / r.cycle_s),
                 "negative_intersection_loss_ratio": (
                     None if r.intersection_loss_s is None or r.cycle_s <= 0 else -r.intersection_loss_s / r.cycle_s),
             })
@@ -368,6 +397,7 @@ class ReportBuilder:
             "balanced_groups": {k: float(v) for k, v in sol.balanced_groups.items()},
             "band_reward_s": sol.band_reward_s,
             "margin_loss_s": sol.margin_loss_s,
+            "green_edge_loss_s": sol.green_edge_loss_s,
             "intersection_loss_s": sol.loss_s,
         }
 

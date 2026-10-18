@@ -114,6 +114,8 @@
 | `w_min` | `min_band_width_s` | stage-1 允许的最小带宽（默认 1.0s） |
 | `δ_min` | `margin.delta_min_s` | margin 期望值：带宽两侧希望留出的秒数 |
 | `hard_min` | `margin.hard_min_s` | margin 硬下限（0 表示不启用） |
+| `free_s` / `hard_max_s` | `EdgeSpec` | 边界亲和的免费额度 / 硬上限（`green_boundary`、`red_boundary`；§5.10.1、§11.6） |
+| `σ^e` | `gw_edge_lo/hi[...]`、`rw_edge_start/end[...]` | 边界亲和的超出量（slack），每侧一组，乘 `coef` 进 composite |
 | `M` | `BigMTable` | big-M；代码里按用途分 `containment` / `plan_activation` / `soft` 三个常量（同值）。详见 §5.14 |
 | `M_hard` / `M_edge` / `Mm` | 局部变量 | 同一个 M 在具体约束里的**局部记法**：`M_hard` = 该行用的硬 M（`containment`）、`M_edge` = 红带相容边的软 M（`soft`）、`Mm` = 红波回绕整数 `m` 的**专用紧 M**（§5.14.4） |
 | `W_g` / `Wr_{r,k}` | — | C13 里：所选上游绿窗 / 下游红窗实例的**最大可能宽度** |
@@ -140,6 +142,7 @@
 | `C7` | `C7` | 多带排序、圆环不重叠、窗口独占 |
 | （C4 配套） | `WIN` | 有效窗口可用性定义（`h = Σ_p A·x_p`） |
 | `C8` | `C8` / `C8_HARD` | margin 短缺（软）/ margin 硬下限 |
+| （C8 配套） | `C8_EDGE` / `C8_EDGE_HARD` | 绿波边界亲和（贴合损失）的软罚 / 硬上限 |
 | `C9` | `C9` / `C9_RED_EDGE` / `C9_RED_EDGE_HARD` | 红带构造（`ag`/`ar`、红带存在性、红带相容边） |
 | `C10` | `USER_HARD` / `USER_SOFT` | 用户全局约束 |
 | `C11` | （空实现） | 双周期一致性：v2 里结构性成立，不建行 |
@@ -151,7 +154,7 @@
 | — | `PLAN_WINDOW` | 相位边界自身的有序性与最小相位 |
 | — | `MCC` | McCormick 线性化的四条边 |
 | — | `BALANCED` | 均衡组（`z_g ≤ Β_b / target_b`）与 min_existing 短缺 |
-| `V1`～`V11` | `V1`～`V11` | **schema 输入校验规则编号**（`schema/validation.py`），建模前就把坏输入挡掉；例如 V4 节点顺序、V5 节点物理相邻、V7 全局约束不得引用方案作用域原子 |
+| `V1`～`V12` | `V1`～`V12` | **schema 输入校验规则编号**（`schema/validation.py`），建模前就把坏输入挡掉；例如 V4 节点顺序、V5 节点物理相邻、V7 全局约束不得引用方案作用域原子 |
 
 ### 0.6 重名提醒（同一个字母在本代码/文档里有多个含义）
 
@@ -190,6 +193,7 @@
 | `allow_window_sharing` | 是否允许同一条需求的多条带共用同一个绿窗（§7.4） |
 | `weight` | 目标里这条需求带宽的权重（单位：秒 → 目标仍是秒） |
 | `delta_min_s` / `coef` / `hard_min_s` | margin 的期望值 / 罚系数 / 硬下限（§5.10，仅绿波） |
+| `green_boundary`（`free_s` / `coef` / `hard_max_s`） | 绿波边界亲和：**默认关闭**，只有显式配置需求级 `green_boundary` 或全局 `green_boundary_default` 才生效；开启后超出 `free_s` 的部分按 `coef` 罚，可选硬上限（§5.10.1） |
 | `red_boundary`（`free_s` / `coef` / `hard_max_s`） | 红波边界亲和：前 `free_s` 秒免费、超出按 `coef` 罚、可选硬上限（§11.6） |
 
 ## 1. 先建立物理图像
@@ -237,7 +241,7 @@
 > 然后要求 `[u, u+β]` 在**每个**路口都放得下。于是 `β` 自动被"最紧的那个路口"
 > 卡住——最大化目标会把它顶到不能再大为止。
 > 这就是"带宽由链上最紧的窗口决定，不需要额外写 min 函数"
-> （`greenwave/model/builder.py:1047`）。
+> （`greenwave/model/builder.py:1052`）。
 
 还有一个**必须一开始就知道**的结论（§8 会用实测数字讲透）：
 
@@ -369,7 +373,7 @@ u + T_j + β  ≤ φ_i + e_{i,d,k} + n·C
 每个节点的 `n` 各自独立——§8.1 的实测解里 `n = (1, 0, 1)` 就是这种情况。
 
 `n` 的**可行范围**不是拍脑袋给的，而是用"区间必须相交"推出来的
-（`builder.py:443` `_green_wrap_bounds_for_node`）：
+（`builder.py:449` `_green_wrap_bounds_for_node`）：
 
 ```
 n_hi = floor( (u_max + T_j − φ_min − s_min) / C )
@@ -380,19 +384,19 @@ n_lo = ceil ( (u_min + β_min + T_j − φ_max − e_max) / C )
 取各变量在各自界上最松的组合即 `n_hi`；由 `u + T_j + β ≤ φ + e + nC`
 得 `n ≥ (u + T_j + β − φ − e)/C`，取最松组合即 `n_lo`。
 若 `n_lo > n_hi`，说明**这个 (路口, 窗口槽) 组合下无论如何都不可能有整数 n**，
-直接禁止选用它（`builder.py:1022`）——这是一条很有效的预剪枝。
+直接禁止选用它（`builder.py:1027`）——这是一条很有效的预剪枝。
 
 > **工程上的坑（真实踩过）**：`n` 的区间是用 `φ` 的**上下界**推出来的，
 > 所以 `φ` 必须在**建模之前**就定好。曾经试过"建完模型再钉 φ"，
 > 结果 `n` 的区间还是老的，把最优解卡死了（`phi_fix` 参数因此存在，
-> `builder.py:144`）。
+> `builder.py:149`）。
 
 ### 2.4 锚点：φ 有一个自由度是假的
 
 把所有路口的 `φ` 同时加一个常数 `Δ`，物理上**完全等价**（整个系统在时间上平移）。
 这种"看起来不同、实际同一个解"的自由度叫 gauge 自由度。不处理它，
 求解器会在一大堆等价解里打转。处理办法极简：**钉住走廊第一个路口（锚点，`corridor.intersections[0]`，标准案例里是 I1）的 φ = 0**
-（`builder.py:199` `_build_offsets`）。
+（`builder.py:205` `_build_offsets`）。
 
 顺带解释一个后来做分解时的关键认知：
 **正因为 φ 只是 gauge，跨路口的耦合看起来很强、其实很弱**——
@@ -408,11 +412,11 @@ n_lo = ceil ( (u_min + β_min + T_j − φ_max − e_max) / C )
 
 | 变量 | 类型 | 界 | 含义 | 为什么需要它 |
 |---|---|---|---|---|
-| `plan_on[i,p]`（`x_{i,p}`） | 二进制 | [0,1] | 路口 i 选方案 p | 配时方案是离散菜单；单方案路口**不建**这个变量（直接代入，省 0/1 和 big-M 行，`builder.py:185`） |
+| `plan_on[i,p]`（`x_{i,p}`） | 二进制 | [0,1] | 路口 i 选方案 p | 配时方案是离散菜单；单方案路口**不建**这个变量（直接代入，省 0/1 和 big-M 行，`builder.py:190`） |
 | `bnd_delta[p,d,y]`（δ） | **连续标量** | 取值域 = 方案声明的 `adjust` 区间（区间是**界**，不是"δ 是个区间"） | 方案 p 方向 d 的**第 y 条相位边界**的微调量，单位是**周期比例**：边界秒值 = `(pos_r + δ)·C`。第三键就是边界下标，与「需求链位置 j」无关 | "允许把绿灯结束点往后挪一点"这种真实可调量 |
 | `bnd_xdelta[p,d,y]`（z） | 连续标量 | `[min(0,lo), max(0,hi)]` | `z = x·δ` 的线性化替身 | 边界秒值是 `(pos_r + δ)·C`，而 δ 只在方案被选中时才该生效 → 乘积 `x·δ` 是双线性的，必须线性化 |
 
-**双线性项 `z = x·δ` 的 McCormick 线性化**（`builder.py:245`）：
+**双线性项 `z = x·δ` 的 McCormick 线性化**（`builder.py:251`）：
 
 ```
 z ≤ hi·x            z ≥ lo·x
@@ -558,7 +562,7 @@ mask = [T, F, T, T, F]   →  窗口槽 1 = 第1段, 窗口槽 2 = 第3~4段合�
 即 `expanded_mask = mask + mask`、边界复制一份加 0.5，并在半周期处补一个
 **常数边界 0.5**（seam），最后按位置排序。于是派生窗口数量翻倍，
 但**两份共用同一个 δ**——一致性是结构性的，不需要额外等式（C11 因此是空实现，
-`builder.py:953`）。这就是为什么"双周期路口要 `max_bands=2` 才有意义"。
+`builder.py:959`）。这就是为什么"双周期路口要 `max_bands=2` 才有意义"。
 
 ### 4.4 有效窗口：把"方案选择"折进窗口表达式
 
@@ -704,7 +708,7 @@ a ≤ h 行：
 ### 5.1 C1 方案选择
 
 ```
-Σ_p x[i,p] = 1                    ∀i        （builder.py:196）
+Σ_p x[i,p] = 1                    ∀i        （builder.py:201）
 ```
 
 "每个路口必须且只能选一个方案"。单方案路口不建 `x`，直接当成常数 1 代入。
@@ -712,7 +716,7 @@ a ≤ h 行：
 ### 5.2 C2 方案内硬约束（big-M 条件激活）
 
 方案自带的约束（例如"上行绿灯结束点 ≤ 0.7C"、"上下行绿灯同时结束"）
-只在**该方案被选中**时才必须成立（`builder.py:747`）：
+只在**该方案被选中**时才必须成立（`builder.py:753`）：
 
 ```
 sense 为 ≤  :  lhs + M·x ≤ rhs + M      即  lhs ≤ rhs + M(1−x)
@@ -725,12 +729,12 @@ sense 为 == :  上面两条同时加
 
 M 的取法：按该约束里每个原子在**声明范围内**的最大可能量级估
 （边界原子用 `(pos_r+adjust_ub)·C`，窗口时长用 `3C` 等），
-再取 `max(估计总量, |rhs|) + 1`（`builder.py:380`）。
+再取 `max(估计总量, |rhs|) + 1`（`builder.py:386`）。
 **绝不用 1e6 这种通用大 M**：会毁掉 LP 松弛质量、引发数值问题。
 
 ### 5.3 方案内软约束（C3）：不是"必须"，而是"尽量"
 
-同一位置如果写成软约束（`soft.coef > 0`，`builder.py:763`），就变成：
+同一位置如果写成软约束（`soft.coef > 0`，`builder.py:769`），就变成：
 
 ```
 lhs ≤ rhs + σ_c + M(1−x) ,   σ_c ≥ 0
@@ -742,7 +746,7 @@ lhs ≤ rhs + σ_c + M(1−x) ,   σ_c ≥ 0
 
 ### 5.4 PLAN_WINDOW：相位自身的合法性
 
-方案内部的相位必须有序且不太短（`builder.py:919`）：
+方案内部的相位必须有序且不太短（`builder.py:925`）：
 
 ```
 b_0 ≥ min_phase                     （秒）
@@ -755,8 +759,8 @@ b_{m−1} ≤ hi·C − min_phase            （hi = 0.5 双周期 / 1.0 单周�
 ### 5.5 C4 绿带指派
 
 ```
-Σ_k a[b,q,j,k] = e[b,q]                  ∀b,q,j     （builder.py:1102）
-a[b,q,j,k] ≤ h[I_j, d_b, k]              ∀b,q,j,k   （builder.py:1112）
+Σ_k a[b,q,j,k] = e[b,q]                  ∀b,q,j     （builder.py:1126）
+a[b,q,j,k] ≤ h[I_j, d_b, k]              ∀b,q,j,k   （builder.py:1134）
 ```
 
 第一行：带存在 ⇔ 每个路口**恰好**挑一个窗口槽；
@@ -774,7 +778,7 @@ a[b,q,j,k] ≤ h[I_j, d_b, k]              ∀b,q,j,k   （builder.py:1112）
 
 ### 5.6 C5 绿带包含约束（核心）
 
-对每个 (q, j, k) 两条不等式（`builder.py:1131` / `builder.py:1140`）：
+对每个 (q, j, k) 两条不等式（`builder.py:1137` / `builder.py:1146`）：
 
 ```
 u + T_j          ≥ φ_{I_j} + ŝ_{I_j,k} + n_{b,q,j}·C − M(1 − a[b,q,j,k])
@@ -800,7 +804,7 @@ u + T_j + β      ≤ φ_{I_j} + ê_{I_j,k} + n_{b,q,j}·C + M(1 − a[b,q,j,k])
 
 ### 5.7 NRANGE：n 的紧区间与"不可行槽位"剪枝
 
-`builder.py:986` 把 §2.3 算出来的区间接进模型：
+`builder.py:992` 把 §2.3 算出来的区间接进模型：
 
 ```
 n ≤ n_hi + M(1−a)        n ≥ n_lo − M(1−a)         （选中该槽位时才收紧）
@@ -817,7 +821,7 @@ n_lo > n_hi 的槽位  →  a ≡ 0                          （直接禁止）
 ### 5.8 C6 存在性
 
 ```
-β ≤ C·e                    （builder.py:1148）
+β ≤ C·e                    （builder.py:1169）
 ```
 
 `e=0` 时 β=0（不存在的带不贡献目标、也不占用圆环时间）；
@@ -825,7 +829,7 @@ n_lo > n_hi 的槽位  →  a ≡ 0                          （直接禁止）
 
 ### 5.9 C7 多带：排序、圆环不重叠、窗口独占
 
-同一条需求的多个带槽之间（`builder.py:1155`）：
+同一条需求的多个带槽之间（`builder.py:1160`）：
 
 ```
 u_q ≤ u_{q2}                                   （按起点编号，破对称）
@@ -839,7 +843,7 @@ u_{q2} + β_{q2} ≤ u_q + C                      （q2 绕回 0 点后仍不压
 不禁止重叠就会让"同一条物理带被数两遍"，目标虚高。
 第二条 + 第三条合起来表达的是**圆环上的不重叠**（时间轴是首尾相接的圆）。
 
-**窗口独占**（默认，`builder.py:1180`）：
+**窗口独占**（默认，`builder.py:1206`）：
 
 ```
 Σ_q a[b,q,j,k] ≤ 1     （同一条需求的多个带槽不能共用同一个绿窗）
@@ -861,15 +865,15 @@ u_{q2} + β_{q2} ≤ u_q + C                      （q2 绕回 0 点后仍不压
 > 剩下 1 个差 0.0002（且两侧都是 time_limit）；另有 1 例打开后从 optimal
 > 变成 time_limit——因为约束与变量都变多了。
 
-### 5.10 C8 绿带 margin：把"太贴边"变成钱
+### 5.10 C8 绿带 margin 与 C8_EDGE 贴合损失：太贴边不行，太不贴边也不行
 
 现实里带宽贴着绿灯边界不好（排队、清空时间），所以引入**margin**：
 带宽起点距离窗口起点、终点距离窗口终点，各自希望至少有 `δ_min` 秒。
 
-**硬下限**（`hard_min_s > 0` 时，`builder.py:1195`）：直接写成 C5 的加强版，
+**硬下限**（`hard_min_s > 0` 时，`builder.py:1214`）：直接写成 C5 的加强版，
 把 `u + T_j ≥ φ + s + nC` 换成 `u + T_j ≥ φ + s + nC + hard_min`。
 
-**软短缺**（`delta_min_s > 0, coef > 0`，`builder.py:1230`）：
+**软短缺**（`delta_min_s > 0, coef > 0`，`builder.py:1244`）：
 
 ```
 σ^s ≥ δ_min − (u + T_j − φ − ŝ − nC) − M(1−a)      （左侧不够的部分）
@@ -883,20 +887,59 @@ u_{q2} + β_{q2} ≤ u_q + C                      （q2 绕回 0 点后仍不压
   因为目标在最小化 σ，最优时会自动取等号；
 * σ 是对**每一个 (q, j, k)** 建的，没被选中的窗口靠 `M(1−a)` 放松、σ 取 0；
 * **报告里的 margin 损失不是直接读 σ**：σ 只是"模型认为的下界"，
-  解码时用几何法重新算真实短缺（`report/solution.py:253`
-  `_actual_margin_penalty`）——这是一个值得记住的工程习惯：
+  解码时用几何法重新算真实短缺（`report/solution.py:256`
+  `_actual_green_penalties`）——这是一个值得记住的工程习惯：
   **目标函数里的松弛变量值可以大于真实违反量，报告要重算**。
+
+#### 5.10.1 C8_EDGE 绿带边界亲和（贴合损失）
+
+margin 罚的是"**离窗口边界太近**"；反过来还要一个"**离窗口边界太远**"的罚，
+让带端点贴住一个参照位置——这就是**边界亲和（贴合损失）**，与红波的
+`C9_RED_EDGE` 是同一套机制（§11.6）。
+
+绿波的参照位置是**本节点的绿灯起点（起点侧）/ 绿灯终点（终点侧）**：
+
+```
+gap_start = (u + T_j) − (φ + ŝ + nC)        ← 带起点比绿窗起点晚多少
+gap_end   = (φ + ê + nC) − (u + T_j + β)    ← 带终点比绿窗终点早多少
+σ^{e,s} ≥ gap_start − free_s − M(1−a)
+σ^{e,e} ≥ gap_end   − free_s − M(1−a)
+（可选硬上限）gap_start ≤ hard_max_s + M(1−a)，gap_end 同理
+```
+
+composite 减去 `coef · Σσ^e`。**这一项默认关闭**：不显式配置就不会出现，
+避免用户不知道目标里多了一项罚。开启方式（需求级 `green_boundary` 或全局
+`green_boundary_default`，`models.py:958`）例如：
+
+```json
+"green_boundary_default": {"start": {"free_s": 3.0, "coef": 0.2}, "end": null}
+```
+
+含义是"带起点最好在绿灯起点后 3 秒内出发"。要点：
+
+* `start` / `end` 两侧**各自独立**配置（`free_s`、`coef`、`hard_max_s` 都可不同，
+  也可以只开一侧）；两侧都开且**系数相同**时，因为
+  `gap_start + gap_end = W − β`，这一项会退化成"带宽加权重"（软最小宽度），
+  没有定位作用；
+* 与 margin 一起构成**目标区间** `δ_min ≤ gap ≤ free_s`；若 `free_s < δ_min`
+  两者会互相拉扯（校验 `V12` 警告），实际有效目标会被拉到 `free_s`；
+* 参考窗口就是**本节点自己的窗口**，所以只有当带被别的路口卡住、
+  本节点存在富余（`W_j − β` 秒）时罚值才不为零；若偏移完全自由，
+  它可以被压到 0 且**不损失带宽**——此时它的作用是给出"带从绿灯起点出发"
+  的规范解，并把"贴合程度"变成一个可报告的秒数（`green_edge_loss_s`）；
+* 报告里同样**不能直接读 σ**（σ 挂在 `a` 上，未选中窗口会污染），
+  只能与 margin 共用同一段几何重算（§5.10 最后一条）。
 
 ### 5.11 C10 用户全局约束
 
 用户可以写"上行总带宽 ≥ 15s（硬）"、"上行总带宽尽量 ≥ 20s（软）"这类
-跨需求的约束（`builder.py:1681`，代码里的 group 是 `USER_HARD` / `USER_SOFT`）。
+跨需求的约束（`builder.py:1776`，代码里的 group 是 `USER_HARD` / `USER_SOFT`）。
 
 **可用原子只有三种**：`offset`（φ）、`bandwidth`（`Β_b = Σ_q β`）、`const`。
 `boundary` / `window_duration` / `red_duration` 是**方案作用域**的原子，
 写进全局约束会被校验规则 **V7** 直接拒绝（`schema/validation.py:61`），
 即使绕过校验，建模层也会抛
-`GWModelError: boundary atom referenced outside a plan constraint`（`builder.py:284`）。
+`GWModelError: boundary atom referenced outside a plan constraint`（`builder.py:289`）。
 想写"某个绿灯至少要多长"这类要求，得写进**方案自己的** `hard_constraints` /
 `soft_constraints`（C2/C3），或用作用域模板 `constraint_templates`。
 
@@ -905,7 +948,7 @@ u_{q2} + β_{q2} ≤ u_q + C                      （q2 绕回 0 点后仍不压
 ### 5.12 C13：给红波补的有效不等式（顺带讲"怎么加强模型"）
 
 红带的指派被因式分解成 `ag`（上游绿窗槽）与 `ar`（下游红窗实例）两组 0/1
-（设计文档 §4.3，`builder.py:1270`）。因式分解后，`β` 与所选窗口宽度之间的
+（设计文档 §4.3，`builder.py:1363`）。因式分解后，`β` 与所选窗口宽度之间的
 联系被 big-M 拉松了，于是补两条**有效不等式**（valid inequality，代码 group = `C13`）：
 
 ```
@@ -922,7 +965,7 @@ u_{q2} + β_{q2} ≤ u_q + C                      （q2 绕回 0 点后仍不压
 ### 5.13 对称破缺：合法地删掉等价解
 
 多带槽的模型有天然对称：把"槽 1"和"槽 2"换个名字还是同一个解。
-`_add_band_slot_symmetry`（`builder.py:961`，仅在 stage-1 打开）加两条：
+`_add_band_slot_symmetry`（`builder.py:967`，仅在 stage-1 打开）加两条：
 
 ```
 e_q ≥ e_{q+1}                （存在的带必须排在前面）
@@ -968,19 +1011,21 @@ C 越大，窗口端点、带起点 u、带宽 β 的界全部按比例变大，
 
 | 字段 | 用在哪 | 代码位置 | 局部记法 |
 |---|---|---|---|
-| `containment` | C5 带的窗口包含（`u + T − φ − ŝ − nC ≥ −M(1−a)`） | `builder.py:1000` | `M` |
-| | C5 回绕整数 n 的全局界 | `builder.py:1122` | `M` |
-| | C7 多带排序 / 圆环分离 | `builder.py:1157` | `M` |
-| | C8_HARD margin 硬下限 | `builder.py:1197` | `M_hard` |
-| | C9 红带上游包含（`u + β − φ_up − mC − ŝ_up ≤ τ + M(1−ag)`） | `builder.py:1351` 取值、`1404`/`1410` 使用 | `M` |
-| | C9 红带相容**硬**边 | `builder.py:1451` | `M_hard` |
-| | C12 模板约束（RHS 是绝对秒时再补 `abs(rhs)`） | `builder.py:847` | `M + abs(rhs) + 1` |
-| `soft` | C8 margin 短缺 σ | `builder.py:1244` | `M` |
-| | C9 红带相容**软**边 | `builder.py:1450` | `M_edge` |
-| | C10 用户软约束的违反量 `σ_c` 上界 | `builder.py:1696` | `M + abs(rhs) + max_abs_atom_bound(3C) + 1` |
+| `containment` | C5 带的窗口包含（`u + T − φ − ŝ − nC ≥ −M(1−a)`） | `builder.py:1146` | `M` |
+| | NRANGE 回绕整数 n 的紧区间（含不可行剪枝） | `builder.py:1005` | `M` |
+| | C7 多带排序 / 圆环分离 | `builder.py:1175` | `M` |
+| | C8_HARD margin 硬下限 | `builder.py:1215` | `M_hard` |
+| | C9 红带上游包含（`u + β − φ_up − mC − ŝ_up ≤ τ + M(1−ag)`） | `builder.py:1445` 取值、`1498`/`1504` 使用 | `M` |
+| | C8_EDGE_HARD 绿波贴合硬上限 | `builder.py:1340` 起 | `M_hard`（= `containment`） |
+| | C9 红带相容**硬**边 | `builder.py:1545` | `M_hard` |
+| | C12 模板约束（RHS 是绝对秒时再补 `abs(rhs)`） | `builder.py:852` | `M + abs(rhs) + 1` |
+| `soft` | C8 margin 短缺 σ | `builder.py:1262` | `M` |
+| | C8_EDGE 绿波贴合软罚（起点 / 终点） | `builder.py:1316` 起 | `M_edge`（= `soft`） |
+| | C9 红带相容**软**边 | `builder.py:1544` | `M_edge` |
+| | C10 用户软约束的违反量 `σ_c` 上界 | `builder.py:1790` | `M + abs(rhs) + max_abs_atom_bound(3C) + 1` |
 | `plan_activation` | —— **当前没有调用点**：C2/C3 的方案激活没有用这个字段，而是走逐约束估算 `_constraint_activation_m`（见 §5.14.4） | — | — |
 
-另外 `builder.py:1232`、`1461`、`1487` 用 `2M` 当作 margin 短缺 / 红边软量 σ 的**技术上界**
+另外 `builder.py:1250`、`1310`、`1555`、`1581` 用 `2M` 当作 margin 短缺 / 绿波贴合 / 红边软量 σ 的**技术上界**
 （保证变量有界），正常解不会顶到那里。
 
 #### 5.14.3 6C 是怎么来的
@@ -1022,13 +1067,13 @@ LP 上界**完全相同**（1285.97）。所以"别用 1e6"的**主要**理由�
 
 #### 5.14.4 两处比全局 M 更紧的特例
 
-1. **方案内约束的逐约束 M**：`_constraint_activation_m`（`builder.py:381`）不直接用全局 M，
+1. **方案内约束的逐约束 M**：`_constraint_activation_m`（`builder.py:386`）不直接用全局 M，
    而是把约束里的每个原子（`boundary` / `window_duration` / `offset` / `bandwidth` / `const`）
    按各自上界估一遍、乘系数求和，最后取 `max(总量, |rhs|) + 1`。
    C = 140 时实测只出现 **421（= 3C+1）** 和 **841（= 6C+1）** 两个值，
    都比全局 M = 941 紧（差的正好是 `T_max + 9`）。
    好处是 C2/C3 的 LP 松弛更强；代价是**每加一种新原子类型，就要在函数里的局部变量 `atom_ub` 上补一条上界，漏了就误切可行解**。
-2. **红波回绕整数 `m` 的专用 M**：`MRANGE` 用 `Mm = max(1, m_ub − m_lb) + 1`（`builder.py:1419`）。
+2. **红波回绕整数 `m` 的专用 M**：`MRANGE` 用 `Mm = max(1, m_ub − m_lb) + 1`（`builder.py:1512`）。
    `m` 的跨度只有几，实测该行在盒子上的最大可能违反量只有 **1s**，即"需要的 M"是 1 量级；
    代码给的 `Mm` 实测取 **2 或 3**，而同一案例的全局 `containment` 是 877（C = 140）。
    也就是在这一行上，专用 M 把激活变量的系数从 877 压到 2～3——**差了近三个数量级**，
@@ -1050,6 +1095,10 @@ LP 上界**完全相同**（1285.97）。所以"别用 1e6"的**主要**理由�
 + 没有任何一组超过 100%，也就是 **M 在所有被测组合上都还够用**——这是结论的第一半；
 + 但红波多方案案例上余量只剩 **2.5%**（前 5 紧的组合全是它，利用率 94.7%～97.5%），
   说明 `6C` 这一项不是"随手拍大"，而是**真的被用满了**。这是结论的第二半，也是风险所在。
+
+补充：这次 36 组扫描早于 `C8_EDGE` 的引入。该项被松弛的行里出现的是
+`u`、`φ`、`ŝ/ê`、`n` 与 `β`，违反量上界是 `gap ≤ W ≤ C`，比 `6C` 小一个量级，
+不构成新的风险行——所以扫描结论不需要重跑。
 
 所以 `T_max + 6C + 10` 对当前数据与参数范围成立，但它**不是无条件安全**的：
 `T_max` 只按本案例的目标需求取，红波案例里它只有 ~18s，M 几乎完全由 `6C` 决定。
@@ -1075,11 +1124,12 @@ LP 上界**完全相同**（1285.97）。所以"别用 1e6"的**主要**理由�
 
 ## 6. 目标函数
 
-`ArterialModel.expr_composite`（`builder.py:95`）：
+`ArterialModel.expr_composite`（`builder.py:96`）：
 
 ```
 composite =  Σ_b weight_b · Σ_q β_{b,q}                    ← 带宽奖励（要最大化）
            − Σ_{绿带} coef · (σ^s + σ^e)                   ← margin 短缺罚
+           − Σ_{绿带边界亲和} coef · slack                 ← 绿波起点贴合罚
            − Σ_{软约束, owner=composite} coef · σ          ← 用户软约束罚
            + Σ_{均衡组} group.weight · z_g                 ← 均衡组奖励
            − Σ_{红带边界亲和} coef · slack                 ← 红波边界贴合罚
@@ -1098,7 +1148,7 @@ L (只是记录，不进 composite) = Σ_{软约束, owner=intersection_loss} co
    （`pareto/`）：先 `max composite` 得到 `B*`，再对若干 `ε` 求解
    `min L s.t. composite ≥ B* − ε`。这样给出的是一条**前沿**，而不是一个
    拍脑袋的权重。
-3. **均衡组**（`builder.py:1570`）：`z_g ≤ Β_b / target_b`（组内需求带宽的
+3. **均衡组**（`builder.py:1665`）：`z_g ≤ Β_b / target_b`（组内需求带宽的
    归一化最小值），把 `weight·z_g` 加进目标 → "两个方向都要好，
    而不是一个方向特别宽、另一个为零"。这是"公平性"的线性化标准做法。
 
@@ -1149,11 +1199,11 @@ margin 的 `hard_min_s` 把"希望 ≥ δ_min"变成"必须 ≥ hard_min"。
 
 | 手段 | 位置 | 作用 |
 |---|---|---|
-| 紧 big-M（按量级估，不用 1e6） | `builder.py:380` | LP 松弛不被拉松 |
-| NRANGE 逐槽位收紧 n 的界 | `builder.py:986` | 整数变量界小一个数量级 |
-| 逐槽位不可行剪枝 `a ≡ 0` | `builder.py:1022` | 直接删变量 |
+| 紧 big-M（按量级估，不用 1e6） | `builder.py:386` | LP 松弛不被拉松 |
+| NRANGE 逐槽位收紧 n 的界 | `builder.py:992` | 整数变量界小一个数量级 |
+| 逐槽位不可行剪枝 `a ≡ 0` | `builder.py:1027` | 直接删变量 |
 | 有效不等式 C13（红波） | `builder.py` 红带段 | 补回 big-M 丢掉的信息 |
-| 对称破缺（e 单调、β ≥ w_min e） | `builder.py:961` | 删等价分支 |
+| 对称破缺（e 单调、β ≥ w_min e） | `builder.py:967` | 删等价分支 |
 | 预处理剔除不可行方案 | `preprocess/feasibility.py` | 减少 x 变量与整棵搜索树 |
 
 ### 7.6 求解层面的放松：时间上限与 gap
@@ -1243,7 +1293,7 @@ python examples/tutorial_small_cases.py
    要同时服务两个方向；
 2. 行程越短、绿窗越宽，两个方向越能错开，**Σβ 可以超过单个绿窗的宽度**——
    原因是 **C7 的"窗口独占 / 圆环不重叠"只约束同一条需求内部的多个带槽**
-   （`builder.py:1155` 的双重循环在 `for b in band_demands` 之内），
+   （`builder.py:1160` 的双重循环在 `for b in band_demands` 之内），
    **不同需求**的带允许在同一个路口、同一个绿窗里时间重叠。
    实测 70s / τ=6.67 那一行：I1 处上行带占相位 [0,50]（第 0 个副本的绿窗），
    下行带占相位 [6.67,70]（第 1 个副本的同一个物理绿窗），
@@ -1282,7 +1332,7 @@ python examples/tutorial_small_cases.py
 | 5 | **把 n 写成连续** | 连续会让"相邻周期的窗口区间"并起来 → 过度放松、给出物理上不存在的绿波。`n` 必须是整数 |
 | 6 | **掩码首尾同时为绿** | 绿段跨越 0/C 首尾相接，极大段被切断；schema 直接报错要求旋转方案 |
 | 7 | **窗口独占以为是"完全无损"** | 只有"所有路口都共用同一窗口"才无损；部分共用时会切掉真实最优（设计文档 §4.7） |
-| 8 | **直接读 σ 当报告损失** | σ 可能大于真实违反量，报告用几何重算（`report/solution.py:253`） |
+| 8 | **直接读 σ 当报告损失** | σ 可能大于真实违反量，报告用几何重算（`report/solution.py:256`） |
 | 9 | **双周期边界范围** | 双周期方案的边界比例声明在 (0, 0.5)，不是 (0,1)；`PLAN_WINDOW` 的 `hi` 跟着变 |
 | 10 | **手算/推导时把 φ 当常数** | φ 是决策变量（除锚点），单条带的带宽上限就是最窄绿窗；把 φ 当常数会系统性低估带宽（§8.1 的坑） |
 | 11 | **`e=1` 但 `β=0` 的退化带** | MILP 的合法退化最优解，报告/绘图要过滤掉（`solution.py:187`） |
@@ -1291,7 +1341,7 @@ python examples/tutorial_small_cases.py
 
 ## 10. 从解回到图
 
-求解器返回的是变量值向量，解码链（`report/solution.py:74` `SolutionDecoder.decode`）：
+求解器返回的是变量值向量，解码链（`report/solution.py:76` `SolutionDecoder.decode`）：
 
 ```
 x[i,p]        → 每个路口选中的方案（argmax，单方案路口直接取固定方案）
@@ -1428,14 +1478,18 @@ wrap 段 rid = K … 2K−1:  [ ê_r , ŝ_1 + C ]        可用性 = h_r − h_{
 `ar_keys`（`_red_compatible_keys`），把不可能配对的变量直接不建——
 所以红波的 `ag`/`ar` 通常远少于理论个数。**`m` 的区间也按上游窗口槽分别推导**
 （`_red_upstream_wrap_bounds`），并且用**紧的**专用 big-M `Mm`（`m` 的跨度只有几），
-而不是全局 containment M（`builder.py:1418`）。
+而不是全局 containment M（`builder.py:1513`）。
 
-### 11.6 差异 5：目标里的"损失项"从 margin 换成**边界亲和**
+### 11.6 差异 5：红波没有 margin，但两种带都有**边界亲和**（贴合损失）
 
 * **红波没有 margin**：margin 变量只在 `_build_green_bands` 里创建
   （`margin` 是绿波专属，设计文档 C8 明确写"仅绿带；红带无 margin"）；
-* 取而代之的是 **`C9_RED_EDGE` 边界亲和损失**：希望红带的起点贴住上游绿窗起点、
-  终点贴住上游绿窗终点：
+* 但两种带都需要"**贴合损失**"，只是参考边界不同：
+  * 绿波 `C8_EDGE`（`green_boundary`，默认关闭，显式开启后可只开起点侧）：带端贴**本节点**绿窗；
+  * 红波 `C9_RED_EDGE`（`red_boundary`）：带端贴**上游**绿窗。
+  两者共用同一套 `EdgeSpec{free_s, hard_max_s, coef}`，`start`/`end` 两侧独立配置。
+
+红波的口径是（绿波把 `τ` 换成 `T_j`、把上游窗口换成自己的窗口，见 §5.10.1）：
 
 ```
 gap_start = u − (φ_up + ŝ_g + τ)          ← 红带起点比上游绿窗起点晚多少
@@ -1445,11 +1499,13 @@ gap_end   = (φ_up + ê_g + τ) − (u + β)    ← 红带终点比上游绿窗�
 两者都希望 ≈ 0；超出 `free_s` 的部分乘 `coef` 罚进 composite，
 还可以用 `hard_max_s` 加硬上限（`C9_RED_EDGE_HARD`）。
 标准案例的默认配置是 `red_boundary_default: {start: {free_s: 3.0, coef: 0.2}, end: null}`
-——即"红带起点前 3 秒免费，之后每秒罚 0.2"。
+——即"红带起点前 3 秒免费，之后每秒罚 0.2"。绿波**没有**这样的默认值：
+不配置就不启用，需要时按 §5.10.1 显式打开。
 
-另一个编码差异：**红波边界罚在报告里是直接读 slack 变量值的**
-（`report/solution.py:217-232`），而绿波 margin 是解码后**几何重算**的
-（§5.10）——因为红波的 slack 只挂在 `ag` 上、结构简单，不会被"未选中窗口"污染。
+编码差异：**红波边界罚在报告里是直接读 slack 变量值的**
+（`report/solution.py:219-234`），而绿波的 margin 与贴合罚都挂在 `a` 上，
+必须解码后**几何重算**（`report/solution.py:256` `_actual_green_penalties`，
+§5.10）——否则未选中窗口的 slack 会变成"幻影罚"。
 
 ### 11.7 差异 6：带槽数上限的来源不同（以及没有窗口独占行）
 
@@ -1470,7 +1526,7 @@ gap_end   = (φ_up + ê_g + τ) − (u + β)    ← 红带终点比上游绿窗�
 | 2 | 跨度 | 可跨全线 | **只能相邻对**（V4 恰好 2 节点） | 红波是"逐段"的局部需求 |
 | 3 | `u` 的锚点 | 链首（上游端） | **下游路口**（上游是 `u − τ` + 整数 `m`） | 画图必须重建（`_red_band_display_times`） |
 | 4 | 指派变量 | 单个 `gw_win` + `gw_cycle` | 因式分解 `rw_up_win` + `rw_down_win`（含周期偏移）+ `rw_up_cycle` | 需补 C13 两条有效不等式 |
-| 5 | 损失项 | margin（软/硬） | **边界亲和** `C9_RED_EDGE`（free_s + coef，可选 hard_max_s） | 目标里两类项的单位都是秒，可比价 |
+| 5 | 损失项 | margin（软/硬）+ **边界亲和** `C8_EDGE`（默认关闭，需显式开启） | **边界亲和** `C9_RED_EDGE`（无 margin） | 目标里两类项的单位都是秒，可比价 |
 | 6 | 槽数上限 / 独占 | `min(max_bands, chain_max)`，有窗口独占行 | `max(1, max_bands or 3)`，无独占行 | 红波能开的带槽更"自由" |
 
 ### 11.9 一句话理解
@@ -1499,28 +1555,33 @@ gap_end   = (φ_up + ê_g + τ) − (u + β)    ← 红带终点比上游绿窗�
 | `a_{b,q,j,k}` | `gw_win[{b},{q},{node},{slot}]` | 0/1 | 该带在该节点用的窗口槽 |
 | `n_{b,q,j}` | `gw_cycle[{b},{q},{node}]` | 整数 | 周期副本下标 |
 | `σ` | `gw_margin_lo/hi[...]`, `soft_slack[...]` | 连续 ≥0 | margin / 软约束短缺 |
+| `σ^e` | `gw_edge_lo/hi[...]`, `rw_edge_start/end[...]` | 连续 ≥0 | 边界亲和超出 `free_s` 的部分 |
+| `free_s` / `hard_max_s` | `EdgeSpec` | 常数 | 边界亲和的免费额度 / 硬上限 |
+| `green_edge_loss_s` | `SolutionRecord.green_edge_loss_s` | 秒 | 报告字段：绿波贴合损失，解码时按几何位置重算 |
 
 ## 附录 B：代码索引
 
 | 内容 | 位置 |
 |---|---|
-| 建模主流程 `build()` | `greenwave/model/builder.py:152` |
-| C1 方案选择 / φ 锚点 | `builder.py:180` / `builder.py:199` |
-| δ、z 与 McCormick | `builder.py:213` / `builder.py:245` |
+| 建模主流程 `build()` | `greenwave/model/builder.py:158` |
+| C1 方案选择 / φ 锚点 | `builder.py:186` / `builder.py:205` |
+| δ、z 与 McCormick | `builder.py:219` / `builder.py:251` |
 | big-M 常量表 | `greenwave/model/meta.py:30` |
 | 派生窗口（极大绿段、双周期复制） | `greenwave/schema/models.py:503-600` |
 | 有效窗口 `ŝ/ê/h` | `greenwave/model/windows.py:102` |
 | 红窗补集（gap + wrap） | `greenwave/model/windows.py:150` |
-| C2/C3 条件激活与软约束 | `builder.py:606` / `builder.py:628`，调用点 `builder.py:747` / `builder.py:763` |
-| PLAN_WINDOW 最小相位 | `builder.py:919` |
-| 绿带主循环 C4–C8 | `builder.py:1044` |
-| n 的紧区间推导 | `builder.py:443` |
-| NRANGE 接线与剪枝 | `builder.py:986` |
-| 对称破缺 | `builder.py:961` |
-| 红带 C9/C13 | `builder.py:1270` |
-| 均衡组 | `builder.py:1570` |
-| 用户全局/模板约束 | `builder.py:1681` / `builder.py:842` |
+| C2/C3 条件激活与软约束 | `builder.py:612` / `builder.py:634`，调用点 `builder.py:753` / `builder.py:769` |
+| PLAN_WINDOW 最小相位 | `builder.py:925` |
+| 绿带主循环 C4–C8 | `builder.py:1050` |
+| C8_EDGE 绿波贴合损失 | `builder.py:1286` |
+| C9_RED_EDGE 红波贴合损失 | `builder.py:1536` |
+| n 的紧区间推导 | `builder.py:449` |
+| NRANGE 接线与剪枝 | `builder.py:992` |
+| 对称破缺 | `builder.py:967` |
+| 红带 C9/C13 | `builder.py:1365` |
+| 均衡组 | `builder.py:1665` |
+| 用户全局/模板约束 | `builder.py:1776` / `builder.py:848` |
 | 带槽数裁剪 | `greenwave/preprocess/context.py:76` |
-| 目标装配 `expr_composite` / `expr_loss` | `builder.py:95` / `builder.py:119` |
-| 解码与损失重算 | `greenwave/report/solution.py:74` / `:253` |
+| 目标装配 `expr_composite` / `expr_loss` | `builder.py:96` / `builder.py:125` |
+| 解码与损失重算（margin + 贴合） | `greenwave/report/solution.py:76` / `:256` |
 | 教学小案例（本文 §8 的数字来源） | `examples/tutorial_small_cases.py` |

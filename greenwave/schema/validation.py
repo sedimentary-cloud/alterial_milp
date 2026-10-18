@@ -302,6 +302,35 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                     issues.append(ValidationIssue("warning", "V10",
                                                   f"demand {b.id!r} delta_min_s >= min window width; margin target may be unreachable",
                                                   (b.id,)))
+            # V12：绿波边界亲和（贴合损失）的配置检查。
+            #   free_s < delta_min_s → 亲和与 margin 在同一侧反向拉扯，
+            #   有效 margin 目标会被拉到 free_s；
+            #   free_s ≥ 最小窗宽 → 亲和项永远为 0（不起作用）。
+            gb = problem.green_boundary_for(b)
+            for side_name, side in (("start", gb.start), ("end", gb.end)):
+                if side is None or side.coef <= 0:
+                    continue
+                if side.free_s < margin.delta_min_s:
+                    issues.append(ValidationIssue(
+                        "warning", "V12",
+                        f"demand {b.id!r} green boundary {side_name} free_s={side.free_s:g}s "
+                        f"< delta_min_s={margin.delta_min_s:g}s; affinity and margin pull "
+                        f"the same edge in opposite directions (effective margin target -> free_s)",
+                        (b.id,)))
+                widths = []
+                for node in b.nodes:
+                    for p in problem.plans_of(node):
+                        try:
+                            for w in p.effective_windows(b.direction):
+                                widths.append(w.width_r)
+                        except ValueError:
+                            continue
+                if widths and side.free_s >= min(widths) * max(problem.grid.cycles_s):
+                    issues.append(ValidationIssue(
+                        "warning", "V12",
+                        f"demand {b.id!r} green boundary {side_name} free_s="
+                        f"{side.free_s:g}s >= min window width; affinity slack is always 0",
+                        (b.id,)))
 
     # 均衡组校验：组内需求必须存在、不能重复、权重和缺失罚系数非负。
     group_ids = [g.id for g in problem.objective.balanced_groups]

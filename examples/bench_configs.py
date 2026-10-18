@@ -21,7 +21,8 @@ boundaries   : "fixed"      → 删掉所有 adjust 区间，δ≡0；
 ------------------------------------
 * C=140s、κ=1.0（标准案例自带）；
 * backend=scipy(HiGHS)、mip_rel_gap=0、heuristic 关闭、单线程；
-* 所有需求 margin 关掉（delta_min_s=0），红波边界亲和项保留（标准案例自带）；
+* 所有需求 margin 关掉（delta_min_s=0）；绿波边界亲和默认关闭，本矩阵不启用；
+* 红波边界亲和保留（标准案例自带 `red_boundary_default`）；
 * global_constraints / constraint_templates 清空：它们引用了本矩阵里不存在的
   需求 id（如 GW_up_full），保留会直接校验失败；
 * 方案自身 hard_constraints 保留（最小相位、上下行同步、绿窗/红窗下限）。

@@ -759,29 +759,33 @@ class MarginSpec:
                    _num(obj.get("hard_min_s", 0.0), "hard_min_s"))
 
 
-# 红波带边界亲和性配置：红波带边界离上游绿灯区间边界多远开始罚。
+# 带边界亲和性配置（绿波、红波共用）：
+# 带的一端离参考窗口的对应端点多远开始罚。
+#   free_s     : 前 free_s 秒免费；
+#   coef       : 超出部分每秒罚多少（单位同 composite，即秒）；
+#   hard_max_s : 可选的硬上限，None 表示不加硬约束。
 @dataclass(frozen=True)
-class RedEdgeSpec:
+class EdgeSpec:
     free_s: float = 0.0
     hard_max_s: float | None = None
     coef: float = 1.0
 
     def __post_init__(self) -> None:
         if self.free_s < 0:
-            raise ValueError("red edge free_s must be >= 0")
+            raise ValueError("edge free_s must be >= 0")
         if self.coef < 0:
-            raise ValueError("red edge coef must be >= 0")
+            raise ValueError("edge coef must be >= 0")
         if self.hard_max_s is not None and self.hard_max_s < self.free_s:
-            raise ValueError("red edge hard_max_s must be >= free_s")
+            raise ValueError("edge hard_max_s must be >= free_s")
 
     @classmethod
-    def from_obj(cls, obj: Any) -> "RedEdgeSpec | None":
-        if isinstance(obj, RedEdgeSpec):
+    def from_obj(cls, obj: Any) -> "EdgeSpec | None":
+        if isinstance(obj, EdgeSpec):
             return obj
         if obj is None:
             return None
         if not isinstance(obj, Mapping):
-            raise ValueError(f"red edge spec must be an object, got {obj!r}")
+            raise ValueError(f"edge spec must be an object, got {obj!r}")
         hard = obj.get("hard_max_s")
         return cls(
             free_s=_num(obj.get("free_s", 0.0), "free_s"),
@@ -790,10 +794,13 @@ class RedEdgeSpec:
         )
 
 
+# 一条带的边界亲和配置：起点侧、终点侧各自独立（可只开一侧，或给不同系数）。
+# 绿波（green_boundary）：带端离本路口绿窗对应端点多远开始罚；
+# 红波（red_boundary）  ：带端离上游绿窗对应端点多远开始罚。
 @dataclass(frozen=True)
-class RedBoundarySpec:
-    start: RedEdgeSpec | None = None
-    end: RedEdgeSpec | None = None
+class BoundaryAffinitySpec:
+    start: EdgeSpec | None = None
+    end: EdgeSpec | None = None
 
     def __post_init__(self) -> None:
         # 两端都可以为空；全空表示不启用。
@@ -804,17 +811,24 @@ class RedBoundarySpec:
         return self.start is not None or self.end is not None
 
     @classmethod
-    def from_obj(cls, obj: Any) -> "RedBoundarySpec":
-        if isinstance(obj, RedBoundarySpec):
+    def from_obj(cls, obj: Any) -> "BoundaryAffinitySpec":
+        if isinstance(obj, BoundaryAffinitySpec):
             return obj
         if obj is None:
             return cls()
         if not isinstance(obj, Mapping):
-            raise ValueError(f"red boundary spec must be an object, got {obj!r}")
+            raise ValueError(f"boundary affinity spec must be an object, got {obj!r}")
         return cls(
-            start=RedEdgeSpec.from_obj(obj.get("start")),
-            end=RedEdgeSpec.from_obj(obj.get("end")),
+            start=EdgeSpec.from_obj(obj.get("start")),
+            end=EdgeSpec.from_obj(obj.get("end")),
         )
+
+
+# 旧名字保留：红波边界亲和用的就是这两张表。
+RedEdgeSpec = EdgeSpec
+RedBoundarySpec = BoundaryAffinitySpec
+
+
 
 
 # 一条优化需求：绿波带或红波带。
@@ -828,6 +842,7 @@ class BandDemandSpec:
     weight: float = 1.0
     margin: MarginSpec | None = None
     red_boundary: RedBoundarySpec | None = None
+    green_boundary: BoundaryAffinitySpec | None = None
 
     def __post_init__(self) -> None:
         if self.type not in ("green", "red"):
@@ -835,6 +850,8 @@ class BandDemandSpec:
         _check_direction(self.direction)
         if self.red_boundary is not None and self.type != "red":
             raise ValueError(f"red_boundary is only valid for red demand {self.id!r}")
+        if self.green_boundary is not None and self.type != "green":
+            raise ValueError(f"green_boundary is only valid for green demand {self.id!r}")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "BandDemandSpec":
@@ -850,6 +867,8 @@ class BandDemandSpec:
             margin=MarginSpec.from_obj(obj.get("margin")) if obj.get("margin") is not None else None,
             red_boundary=(RedBoundarySpec.from_obj(obj.get("red_boundary"))
                           if obj.get("red_boundary") is not None else None),
+            green_boundary=(BoundaryAffinitySpec.from_obj(obj.get("green_boundary"))
+                            if obj.get("green_boundary") is not None else None),
         )
 
 
@@ -936,6 +955,10 @@ class ObjectiveConfig:
     band_demands: tuple[BandDemandSpec, ...]
     margin_default: MarginSpec = field(default_factory=MarginSpec)
     red_boundary_default: RedBoundarySpec = field(default_factory=RedBoundarySpec)
+    # 绿波边界亲和：默认关闭；用户显式配置 green_boundary_default 或需求级
+    # green_boundary 才生效（不做隐式默认，避免用户不知道目标里多了一项）。
+    green_boundary_default: BoundaryAffinitySpec = field(
+        default_factory=BoundaryAffinitySpec)
     pareto: ParetoConfig = field(default_factory=ParetoConfig)
     allow_window_sharing: bool = False
     balanced_groups: tuple[BalancedGroupSpec, ...] = ()
@@ -948,6 +971,8 @@ class ObjectiveConfig:
             band_demands=tuple(BandDemandSpec.from_obj(d) for d in obj.get("band_demands", ())),
             margin_default=MarginSpec.from_obj(obj.get("margin_default")),
             red_boundary_default=RedBoundarySpec.from_obj(obj.get("red_boundary_default")),
+            green_boundary_default=BoundaryAffinitySpec.from_obj(
+                obj.get("green_boundary_default")),
             pareto=ParetoConfig.from_obj(obj.get("pareto")),
             allow_window_sharing=bool(obj.get("allow_window_sharing", False)),
             balanced_groups=tuple(BalancedGroupSpec.from_obj(g)
@@ -1116,6 +1141,11 @@ class ProblemInput:
             return demand.red_boundary
         return self.objective.red_boundary_default
 
+    def green_boundary_for(self, demand: BandDemandSpec) -> BoundaryAffinitySpec:
+        if demand.green_boundary is not None:
+            return demand.green_boundary
+        return self.objective.green_boundary_default
+
     def validate_all(self) -> list[ValidationIssue]:
         from .validation import validate_problem
         return validate_problem(self)
@@ -1137,6 +1167,18 @@ class ProblemInput:
 
     # pydantic-like alias for readability at call sites
     model_dump = None  # replaced below by method; placeholder for type checkers
+
+
+def _edge_obj(spec: EdgeSpec | None) -> dict[str, Any] | None:
+    if spec is None:
+        return None
+    return {"free_s": spec.free_s, "hard_max_s": spec.hard_max_s, "coef": spec.coef}
+
+
+def _boundary_obj(spec: BoundaryAffinitySpec | None) -> dict[str, Any] | None:
+    if spec is None:
+        return None
+    return {"start": _edge_obj(spec.start), "end": _edge_obj(spec.end)}
 
 
 def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
@@ -1208,36 +1250,16 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
                     "coef": b.margin.coef,
                     "hard_min_s": b.margin.hard_min_s,
                 },
-                "red_boundary": None if b.red_boundary is None else {
-                    "start": None if b.red_boundary.start is None else {
-                        "free_s": b.red_boundary.start.free_s,
-                        "hard_max_s": b.red_boundary.start.hard_max_s,
-                        "coef": b.red_boundary.start.coef,
-                    },
-                    "end": None if b.red_boundary.end is None else {
-                        "free_s": b.red_boundary.end.free_s,
-                        "hard_max_s": b.red_boundary.end.hard_max_s,
-                        "coef": b.red_boundary.end.coef,
-                    },
-                },
+                "red_boundary": _boundary_obj(b.red_boundary),
+                "green_boundary": _boundary_obj(b.green_boundary),
             } for b in self.objective.band_demands],
             "margin_default": {
                 "delta_min_s": self.objective.margin_default.delta_min_s,
                 "coef": self.objective.margin_default.coef,
                 "hard_min_s": self.objective.margin_default.hard_min_s,
             },
-            "red_boundary_default": {
-                "start": None if self.objective.red_boundary_default.start is None else {
-                    "free_s": self.objective.red_boundary_default.start.free_s,
-                    "hard_max_s": self.objective.red_boundary_default.start.hard_max_s,
-                    "coef": self.objective.red_boundary_default.start.coef,
-                },
-                "end": None if self.objective.red_boundary_default.end is None else {
-                    "free_s": self.objective.red_boundary_default.end.free_s,
-                    "hard_max_s": self.objective.red_boundary_default.end.hard_max_s,
-                    "coef": self.objective.red_boundary_default.end.coef,
-                },
-            },
+            "red_boundary_default": _boundary_obj(self.objective.red_boundary_default),
+            "green_boundary_default": _boundary_obj(self.objective.green_boundary_default),
             "pareto": {"num_points": self.objective.pareto.num_points,
                        "relax_max": self.objective.pareto.relax_max,
                        "topk_grids": self.objective.pareto.topk_grids},
@@ -1273,7 +1295,8 @@ __all__ = [
     "Direction", "Side", "Unit", "BoundarySpec", "DirectionPlan", "DerivedInterval",
     "WindowSpec", "AtomRef", "LinearTerm", "SoftPenalty", "ConstraintSpec",
     "ConstraintScope", "ConstraintTemplate", "PlanSpec",
-    "SegmentSpec", "CorridorSpec", "MarginSpec", "RedEdgeSpec", "RedBoundarySpec",
+    "SegmentSpec", "CorridorSpec", "MarginSpec", "EdgeSpec", "BoundaryAffinitySpec",
+    "RedEdgeSpec", "RedBoundarySpec",
     "BandDemandSpec",
     "BalancedGroupSpec", "ParetoConfig", "ObjectiveConfig", "GridConfig", "HeuristicConfig",
     "SolverConfig", "MultistageConfig", "ProblemInput",

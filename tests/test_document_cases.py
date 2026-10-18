@@ -230,6 +230,86 @@ class TestDocumentCases(unittest.TestCase):
         out = run(d)
         self.assertEqual(out["grid_results"][0]["status"], "infeasible")
 
+    # 绿波边界亲和（贴合损失）：带起点应当贴近本节点的绿灯起点。
+    def _green_boundary_problem(self, *, coef=0.2, free_s=3.0, hard_max_s=None,
+                                pin_phi3=25.0):
+        corridor = {"corridor_id": "green_boundary",
+                    "intersections": ["I1", "I2", "I3"],
+                    "segments": [_seg("I1", "I2", dist=200.0, v=10.0),
+                                 _seg("I2", "I3", dist=200.0, v=10.0)]}
+        plans = [_plan("I1", [[0.0, 0.5]], [[0.0, 0.5]]),
+                 _plan("I2", [[0.0, 30.0 / 90.0]], [[0.0, 30.0 / 90.0]]),
+                 _plan("I3", [[0.0, 0.5]], [[0.0, 0.5]])]
+        demands = [{"id": "GW_up", "type": "green", "direction": "up",
+                    "nodes": ["I1", "I2", "I3"], "weight": 1.0,
+                    "margin": {"delta_min_s": 0.0, "coef": 1.0},
+                    "green_boundary": {"start": {"free_s": free_s, "coef": coef,
+                                                 "hard_max_s": hard_max_s}}}]
+        d = _base_problem(cycle=90.0, plans=plans, demands=demands, margin=0.0,
+                          corridor=corridor)
+        # 钉住 I3 的偏移：带在 I3 的到达 = 40s，绿窗起点 = 25s → gap_start = 15s。
+        d["global_constraints"] = [
+            {"id": "pin_lo", "terms": [{"atom": {"kind": "offset", "intersection": "I3"},
+                                        "coef": 1.0}], "sense": ">=", "rhs": pin_phi3, "hard": True},
+            {"id": "pin_hi", "terms": [{"atom": {"kind": "offset", "intersection": "I3"},
+                                        "coef": 1.0}], "sense": "<=", "rhs": pin_phi3, "hard": True},
+        ]
+        return d
+
+    def test_green_boundary_affinity_loss(self):
+        out = run(self._green_boundary_problem())
+        grid = out["grid_results"][0]
+        sol = out["pareto"]["points"][0]["solution"]
+        self.assertEqual(grid["status"], "optimal")
+        # β 由 I2 的 30s 绿窗卡住；I3 的贴合损失 = 0.2 × (15 − 3) = 2.4s。
+        self.assertAlmostEqual(grid["bandwidth_objective_s"], 30.0, places=3)
+        self.assertAlmostEqual(sol["green_edge_loss_s"], 2.4, places=3)
+        self.assertAlmostEqual(grid["composite_best"], 30.0 - 2.4, places=3)
+        self.assertAlmostEqual(sol["margin_loss_s"], 0.0, places=6)
+        # 不钉偏移时：模型自己把带挪进 free_s 内，损失为 0、带宽不变。
+        d_free = self._green_boundary_problem()
+        d_free["global_constraints"] = []
+        out_free = run(d_free)
+        sol_free = out_free["pareto"]["points"][0]["solution"]
+        self.assertAlmostEqual(out_free["grid_results"][0]["bandwidth_objective_s"], 30.0, places=3)
+        self.assertAlmostEqual(sol_free["green_edge_loss_s"], 0.0, places=4)
+        self.assertAlmostEqual(out_free["grid_results"][0]["composite_best"], 30.0, places=3)
+
+    def test_green_boundary_coef_override(self):
+        # 需求级覆盖：free_s=0、coef=1 → 罚满 15s，composite 变成 15。
+        out = run(self._green_boundary_problem(coef=1.0, free_s=0.0))
+        sol = out["pareto"]["points"][0]["solution"]
+        self.assertAlmostEqual(sol["green_edge_loss_s"], 15.0, places=3)
+        self.assertAlmostEqual(out["grid_results"][0]["composite_best"], 15.0, places=3)
+
+    def test_green_boundary_default_off(self):
+        # 默认关闭：不显式配置就不会凭空多出贴合损失（用户不被隐式加罚）。
+        d = _base_problem(margin=0.0)
+        problem = ProblemInput.from_obj(d)
+        self.assertFalse(problem.green_boundary_for(problem.demand("GW_up")).enabled)
+        out = run(d)
+        self.assertAlmostEqual(out["pareto"]["points"][0]["solution"]["green_edge_loss_s"],
+                               0.0, places=6)
+        # 显式开启：全局默认 + 需求级覆盖都支持。
+        d["objective"]["green_boundary_default"] = {"start": {"free_s": 3.0, "coef": 0.2}}
+        problem2 = ProblemInput.from_obj(d)
+        gb = problem2.green_boundary_for(problem2.demand("GW_up"))
+        self.assertTrue(gb.enabled)
+        self.assertAlmostEqual(gb.start.free_s, 3.0)
+        self.assertAlmostEqual(gb.start.coef, 0.2)
+        self.assertIsNone(gb.end)
+
+    def test_green_boundary_hard_max_can_be_infeasible(self):
+        # 硬上限 0 要求带起点与绿窗起点重合；偏移被钉在 25s 时不可能。
+        d = self._green_boundary_problem(coef=0.0, free_s=0.0, hard_max_s=0.0)
+        d["global_constraints"].append({
+            "id": "force_green_band",
+            "terms": [{"atom": {"kind": "bandwidth", "demand": "GW_up"}, "coef": 1.0}],
+            "sense": ">=", "rhs": 1.0, "hard": True,
+        })
+        out = run(d)
+        self.assertEqual(out["grid_results"][0]["status"], "infeasible")
+
     # T6: adjustable endpoint + intersection-loss soft constraint + epsilon scan
     def test_t6_adjustable_soft_pareto(self):
         soft = [{"id": "endsoft", "terms": [{

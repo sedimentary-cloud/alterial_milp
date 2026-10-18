@@ -39,6 +39,8 @@ GW_WIN: Final = "gw_win"              # 绿带在链上某节点用哪个绿窗�
 GW_CYCLE: Final = "gw_cycle"          # 绿带回绕周期下标 n
 GW_MARGIN_LO: Final = "gw_margin_lo"  # 绿带左侧 margin 短缺
 GW_MARGIN_HI: Final = "gw_margin_hi"  # 绿带右侧 margin 短缺
+GW_EDGE_LO: Final = "gw_edge_lo"      # 绿波边界亲和（起点侧 slack）
+GW_EDGE_HI: Final = "gw_edge_hi"      # 绿波边界亲和（终点侧 slack）
 
 RW_START: Final = "rw_start"          # 红带起点 u（**下游**路口到达时刻）
 RW_WIDTH: Final = "rw_width"          # 红带宽度 β
@@ -59,6 +61,7 @@ SOFT_SLACK: Final = "soft_slack"      # 软约束违反量 σ（含方案软约�
 ALL_FAMILIES: Final[tuple[str, ...]] = (
     PLAN_ON, OFFSET, BND_DELTA, BND_XDELTA, WIN_AVAIL,
     GW_START, GW_WIDTH, GW_ON, GW_WIN, GW_CYCLE, GW_MARGIN_LO, GW_MARGIN_HI,
+    GW_EDGE_LO, GW_EDGE_HI,
     RW_START, RW_WIDTH, RW_ON, RW_UP_WIN, RW_DOWN_WIN, RW_UP_CYCLE,
     RW_EDGE_START, RW_EDGE_END,
     BAL_MIN, BAL_PRESENT, BAL_DEFICIT, SOFT_SLACK,
@@ -136,6 +139,16 @@ def gw_margin_hi(demand: str, slot: int, node: str, win_slot: int) -> str:
     return _fmt(GW_MARGIN_HI, demand, slot, node, win_slot)
 
 
+def gw_edge_lo(demand: str, slot: int, node: str, win_slot: int) -> str:
+    """绿波边界亲和（起点侧）：带起点比绿窗起点晚多少，超出 free_s 的部分。"""
+    return _fmt(GW_EDGE_LO, demand, slot, node, win_slot)
+
+
+def gw_edge_hi(demand: str, slot: int, node: str, win_slot: int) -> str:
+    """绿波边界亲和（终点侧）：带终点比绿窗终点早多少，超出 free_s 的部分。"""
+    return _fmt(GW_EDGE_HI, demand, slot, node, win_slot)
+
+
 def rw_start(demand: str, slot: int) -> str:
     """红带起点 `u`（**下游**路口到达时刻；上游位置 = u − τ）。"""
     return _fmt(RW_START, demand, slot)
@@ -194,6 +207,15 @@ def bal_deficit(group: str) -> str:
 def soft_slack(name_base: str, tag: str) -> str:
     """软约束违反量 σ。`name_base` 形如 `I2_P1.I2_up_end_soft_055` 或约束 id。"""
     return _fmt(SOFT_SLACK, f"{name_base}.{tag}")
+
+
+def edge_name(demand: str, slot: int, node: str, win_slot: int, side: str) -> str:
+    """按 `side ∈ {"lo","hi"}` 取绿波边界亲和变量名（兼容 "s"/"e"）。"""
+    if side in ("lo", "s"):
+        return gw_edge_lo(demand, slot, node, win_slot)
+    if side in ("hi", "e"):
+        return gw_edge_hi(demand, slot, node, win_slot)
+    raise ValueError(f"unknown edge side {side!r}")
 
 
 def margin_name(demand: str, slot: int, node: str, win_slot: int, side: str) -> str:
@@ -257,7 +279,7 @@ def offset_intersection(name: str) -> str | None:
 __all__ = [
     "PLAN_ON", "OFFSET", "BND_DELTA", "BND_XDELTA", "WIN_AVAIL",
     "GW_START", "GW_WIDTH", "GW_ON", "GW_WIN", "GW_CYCLE",
-    "GW_MARGIN_LO", "GW_MARGIN_HI",
+    "GW_MARGIN_LO", "GW_MARGIN_HI", "GW_EDGE_LO", "GW_EDGE_HI",
     "RW_START", "RW_WIDTH", "RW_ON", "RW_UP_WIN", "RW_DOWN_WIN",
     "RW_UP_CYCLE", "RW_EDGE_START", "RW_EDGE_END",
     "BAL_MIN", "BAL_PRESENT", "BAL_DEFICIT", "SOFT_SLACK",
@@ -265,6 +287,7 @@ __all__ = [
     "plan_on", "offset", "bnd_delta", "bnd_xdelta", "win_avail",
     "gw_start", "gw_width", "gw_on", "gw_win", "gw_cycle",
     "gw_margin_lo", "gw_margin_hi", "margin_name",
+    "gw_edge_lo", "gw_edge_hi", "edge_name",
     "rw_start", "rw_width", "rw_on", "rw_up_win", "rw_down_win",
     "rw_up_cycle", "rw_edge_start", "rw_edge_end",
     "bal_min", "bal_present", "bal_deficit", "soft_slack",

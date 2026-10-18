@@ -63,9 +63,9 @@ class MarginSlackRef:
     e_vars: list[VarHandle] = field(default_factory=list)
 
 
-# 一条红波需求的上游/下游? 这里只做上游绿窗边界亲和损失变量集合。
+# 一条带需求的边界亲和松弛变量集合（绿波用本路口绿窗，红波用上游绿窗）。
 @dataclass
-class RedBoundarySlackRef:
+class BoundarySlackRef:
     demand_id: str
     start_coef: float
     end_coef: float
@@ -140,7 +140,9 @@ class ModelMeta:
     red_demands: dict[str, RedDemandModel] = field(default_factory=dict)
     soft: list[SoftPenaltyRef] = field(default_factory=list)
     margins: list[MarginSlackRef] = field(default_factory=list)
-    red_boundary: list[RedBoundarySlackRef] = field(default_factory=list)
+    red_boundary: list[BoundarySlackRef] = field(default_factory=list)
+    # 绿波边界亲和：带端离本节点绿窗对应端点的松弛量。
+    green_boundary: list[BoundarySlackRef] = field(default_factory=list)
     plan_constraints: list[tuple[str, ConstraintMeta]] = field(default_factory=list)
     balanced: dict[str, BalancedGroupModel] = field(default_factory=dict)
 
@@ -148,5 +150,9 @@ class ModelMeta:
         return self.effective[(intersection, d)]
 
 
-__all__ = ["BigMTable", "SoftPenaltyRef", "MarginSlackRef", "RedBoundarySlackRef",
+RedBoundarySlackRef = BoundarySlackRef
+
+
+__all__ = ["BigMTable", "SoftPenaltyRef", "MarginSlackRef", "BoundarySlackRef",
+           "RedBoundarySlackRef",
            "GreenDemandModel", "RedDemandModel", "BalancedGroupModel", "ModelMeta"]

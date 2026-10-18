@@ -48,6 +48,7 @@ class GridPointResult:
     band_reward_s: float | None = None
     margin_loss_s: float | None = None
     intersection_loss_s: float | None = None
+    green_edge_loss_s: float | None = None
 
 
 # 所有格点的汇总报告。
@@ -111,6 +112,7 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
             band_reward_s=fallback.band_reward_s,
             margin_loss_s=fallback.margin_loss_s,
             intersection_loss_s=fallback.intersection_loss_s,
+            green_edge_loss_s=fallback.green_edge_loss_s,
         )
 
     if ms.solution is None and solver_cfg.multistage.fallback_to_full_milp:
@@ -131,6 +133,7 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
             band_reward_s=fallback.band_reward_s,
             margin_loss_s=fallback.margin_loss_s,
             intersection_loss_s=fallback.intersection_loss_s,
+            green_edge_loss_s=fallback.green_edge_loss_s,
         )
     solution = ms.solution
     return GridPointResult(
@@ -147,6 +150,7 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
         band_reward_s=None if solution is None else solution.band_reward_s,
         margin_loss_s=None if solution is None else solution.margin_loss_s,
         intersection_loss_s=None if solution is None else solution.loss_s,
+        green_edge_loss_s=None if solution is None else solution.green_edge_loss_s,
     )
 
 
@@ -189,6 +193,7 @@ def _solve_stage1_full_milp(problem: ProblemInput, ctx: GridPointContext,
         band_reward_s=None if solution is None else solution.band_reward_s,
         margin_loss_s=None if solution is None else solution.margin_loss_s,
         intersection_loss_s=None if solution is None else solution.loss_s,
+        green_edge_loss_s=None if solution is None else solution.green_edge_loss_s,
     )
 
 
@@ -252,7 +257,8 @@ class GridRunner:
             if g is not None:
                 r = GridPointResult(r.cycle_s, r.kappa, r.status, r.composite_best,
                                     g, r.solution, r.dropped, r.time_s, r.message, r.ctx,
-                                    r.band_reward_s, r.margin_loss_s, r.intersection_loss_s)
+                                    r.band_reward_s, r.margin_loss_s, r.intersection_loss_s,
+                                    r.green_edge_loss_s)
             results2.append(r)
         return GridRunReport(tuple(results2 + skipped))
 

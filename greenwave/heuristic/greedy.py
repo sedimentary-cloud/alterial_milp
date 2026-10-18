@@ -437,6 +437,43 @@ class GreedyConstructor:
                     break
         return pen
 
+    def _band_edge_penalty(self, band: ConstructedBand, b: BandDemandSpec,
+                           selection, offsets) -> float:
+        """绿波边界亲和（贴合损失）：带端离本节点绿窗对应端点超出 free_s 的部分。"""
+        if b.type != "green":
+            return 0.0
+        gb = self.problem.green_boundary_for(b)
+        if not gb.enabled:
+            return 0.0
+        start = gb.start if (gb.start is not None and gb.start.coef > 0) else None
+        end = gb.end if (gb.end is not None and gb.end.coef > 0) else None
+        if start is None and end is None:
+            return 0.0
+        table = self.ctx.travel[b.id]
+        pen = 0.0
+        for j, node in enumerate(b.nodes if hasattr(b, "nodes") else table.nodes):
+            slot = band.windows.get(node)
+            if slot is None:
+                continue
+            plan = selection[node]
+            witness = self._witness.get(plan.id, {})
+            slot_inner = slot - 1
+            s = self._window_endpoint_r(plan, b.direction, slot_inner, "start", witness) * self.C + offsets[node]
+            e = self._window_endpoint_r(plan, b.direction, slot_inner, "end", witness) * self.C + offsets[node]
+            band_lo = band.start_s + table.cum_T_s[j]
+            band_hi = band_lo + band.width_s
+            n = math.floor((band_lo - s) / self.C)
+            for nn in (n, n + 1):
+                ss = s + nn * self.C
+                ee = e + nn * self.C
+                if band_lo >= ss - 1e-7 and band_hi <= ee + 1e-7:
+                    if start is not None:
+                        pen += start.coef * max(0.0, (band_lo - ss) - start.free_s)
+                    if end is not None:
+                        pen += end.coef * max(0.0, (ee - band_hi) - end.free_s)
+                    break
+        return pen
+
     def _global_value(self, c, selection, offsets, bands) -> float:
         total = 0.0
         for t in c.terms:
@@ -468,12 +505,14 @@ class GreedyConstructor:
                 if band.demand == b.id:
                     reward += b.weight * band.width_s
         margin_pen = 0.0
+        edge_pen = 0.0
         loss = 0.0
         composite_soft = 0.0
         for b in self.problem.objective.band_demands:
             for band in bands:
                 if band.demand == b.id:
                     margin_pen += self._band_margin_penalty(band, b, selection, offsets)
+                    edge_pen += self._band_edge_penalty(band, b, selection, offsets)
         for iid, plan in selection.items():
             witness = self._witness.get(plan.id, {})
             for c in plan.soft_constraints:
@@ -521,7 +560,7 @@ class GreedyConstructor:
                 deficit = max(0, g.min_existing - actual)
                 balanced_reward -= g.min_existing_penalty_s * deficit
 
-        composite = reward - margin_pen - composite_soft + balanced_reward
+        composite = reward - margin_pen - edge_pen - composite_soft + balanced_reward
         return composite, loss, reward
 
     def _make_solution(self, selection, offsets, bands) -> GreedySolution:

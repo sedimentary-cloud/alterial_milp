@@ -34,9 +34,9 @@ from ..schema.models import (BandDemandSpec, ConstraintSpec, ConstraintTemplate,
 from .constraints import ConstraintMeta, ConstraintStore
 from . import naming
 from .expressions import LinearExpr
-from .meta import (BalancedGroupModel, BigMTable, GreenDemandModel,
-                   MarginSlackRef, ModelMeta, RedBoundarySlackRef,
-                   RedDemandModel, SoftPenaltyRef)
+from .meta import (BalancedGroupModel, BigMTable, BoundarySlackRef,
+                   GreenDemandModel, MarginSlackRef, ModelMeta,
+                   RedBoundarySlackRef, RedDemandModel, SoftPenaltyRef)
 from .variables import GVarType, VarHandle, VariableRegistry
 from .windows import EffectiveWindowBuilder, EffectiveWindowSet, RedWindowBuilder
 
@@ -101,6 +101,11 @@ class ArterialModel:
             for h in list(m.s_vars) + list(m.e_vars):
                 expr.add(h, -m.coef)
         for ref in self.meta.red_boundary:
+            for h in ref.start_vars:
+                expr.add(h, -ref.start_coef)
+            for h in ref.end_vars:
+                expr.add(h, -ref.end_coef)
+        for ref in self.meta.green_boundary:
             for h in ref.start_vars:
                 expr.add(h, -ref.start_coef)
             for h in ref.end_vars:
@@ -1095,6 +1100,19 @@ class ModelBuilder:
             self.meta.green[b.id] = gmodel
             self._add_band_slot_symmetry(b.id, qmax, e, beta, "green")
 
+            # C8_EDGE 的配置：每条需求一份（与红波 C9_RED_EDGE 对称）。
+            # 有软罚系数才需要 slack 变量；只有 hard_max_s 时也允许（只加硬约束）。
+            gb = self.problem.green_boundary_for(b)
+            gb_ref = None
+            if gb.enabled and ((gb.start is not None and gb.start.coef > 0)
+                               or (gb.end is not None and gb.end.coef > 0)):
+                gb_ref = BoundarySlackRef(
+                    demand_id=b.id,
+                    start_coef=gb.start.coef if gb.start is not None else 0.0,
+                    end_coef=gb.end.coef if gb.end is not None else 0.0,
+                )
+                self.meta.green_boundary.append(gb_ref)
+
             for q in range(1, qmax + 1):
                 # C4：如果这条带存在 e=1，那么链上每个节点都必须恰好
                 # 选择一个绿灯窗口槽位；如果 e=0，就一个也不选。
@@ -1264,6 +1282,82 @@ class ModelBuilder:
                                                                  {"demand": b.id, "slot": str(q), "node": node,
                                                                   "window": str(k)}))
                     self.meta.margins.append(ref)
+
+                # C8_EDGE：绿带边界亲和（贴合损失）。
+                # 与 C8 margin 相反：margin 罚“离窗口边界太近”，亲和罚“离窗口边界太远”。
+                #   gap_start = (u + T_j) − (φ + s + nC)   希望 ≤ free_s
+                #   gap_end   = (φ + e + nC) − (u + T_j + β) 希望 ≤ free_s
+                # 默认只开起点侧：让带从绿灯起点出发（“绿波开始贴合”）。
+                # 参考窗口就是带自己这个节点的绿窗，所以 penalty 在
+                # “带被别的路口卡住、本节点存在富余”时才有值。
+                if gb.enabled:
+                    M_edge = self.m.soft
+                    M_hard = self.m.containment
+                    for side in ("s", "e"):
+                        spec = gb.start if side == "s" else gb.end
+                        if spec is None:
+                            continue
+                        for j, node in enumerate(b.nodes):
+                            for k in range(1, self.ctx.max_window_slots(node, d) + 1):
+                                s = self.meta.effective[(node, d)].s[k]
+                                ew = self.meta.effective[(node, d)].e[k]
+                                phi = self.meta.phi[node]
+                                nv = n[(q, j)]
+                                av = a[(q, j, k)]
+                                if spec.coef > 0:
+                                    var = self.vars.add(
+                                        naming.edge_name(b.id, q, node, k, side), 0.0,
+                                        self.m.containment * 2.0, GVarType.CONTINUOUS,
+                                        {"kind": "green_boundary_slack", "demand": b.id,
+                                         "slot": q, "node": node, "window": k, "side": side})
+                                    if gb_ref is not None:
+                                        (gb_ref.start_vars if side == "s"
+                                         else gb_ref.end_vars).append(var)
+                                    M = M_edge
+                                    if side == "s":
+                                        # σ >= gap_start - free - M(1-a)
+                                        # σ - u + φ + s + nC - M·a >= T - free - M
+                                        row = LinearExpr.of(var, 1.0).add(u[q], -1.0)
+                                        row.add(phi, 1.0).add(s, 1.0).add(nv, self.C)
+                                        row.add(av, -M)
+                                        self.cons.add(row, ">=",
+                                                      table.cum_T_s[j] - spec.free_s - M,
+                                                      ConstraintMeta("C8_EDGE",
+                                                                     f"green edge start {b.id}/{q}/{node}/{k}",
+                                                                     {"demand": b.id, "slot": str(q),
+                                                                      "node": node, "window": str(k)}))
+                                    else:
+                                        # σ >= gap_end - free - M(1-a)
+                                        # σ + u + β + T - φ - e - nC - M·a >= -free - M
+                                        row = LinearExpr.of(var, 1.0).add(u[q], 1.0)
+                                        row.add(beta[q], 1.0).add(phi, -1.0).add(ew, -1.0)
+                                        row.add(nv, -self.C).add(av, -M)
+                                        self.cons.add(row, ">=", -spec.free_s - M,
+                                                      ConstraintMeta("C8_EDGE",
+                                                                     f"green edge end {b.id}/{q}/{node}/{k}",
+                                                                     {"demand": b.id, "slot": str(q),
+                                                                      "node": node, "window": str(k)}))
+                                if spec.hard_max_s is not None:
+                                    # gap <= hard_max_s + M(1-a)
+                                    if side == "s":
+                                        row = LinearExpr.of(u[q], 1.0).add(phi, -1.0)
+                                        row.add(s, -1.0).add(nv, -self.C).add(av, M_hard)
+                                        self.cons.add(row, "<=",
+                                                      spec.hard_max_s - table.cum_T_s[j] + M_hard,
+                                                      ConstraintMeta("C8_EDGE_HARD",
+                                                                     f"green edge start max {b.id}/{q}/{node}/{k}",
+                                                                     {"demand": b.id, "slot": str(q),
+                                                                      "node": node, "window": str(k)}))
+                                    else:
+                                        row = LinearExpr.of(phi, 1.0).add(ew, 1.0)
+                                        row.add(nv, self.C).add(u[q], -1.0).add(beta[q], -1.0)
+                                        row.add(av, M_hard)
+                                        self.cons.add(row, "<=",
+                                                      spec.hard_max_s + table.cum_T_s[j] + M_hard,
+                                                      ConstraintMeta("C8_EDGE_HARD",
+                                                                     f"green edge end max {b.id}/{q}/{node}/{k}",
+                                                                     {"demand": b.id, "slot": str(q),
+                                                                      "node": node, "window": str(k)}))
 
     # ------------------------------------------------------------------
     # C9 red bands
