@@ -434,6 +434,36 @@ class TestDocumentCases(unittest.TestCase):
                 "hard": True,
             })
 
+    def test_rhs_seconds_and_ratio_are_additive(self):
+        from greenwave.schema.models import ConstraintSpec, ConstraintTemplate
+        c = ConstraintSpec.from_obj({
+            "id": "mixed_rhs", "terms": [], "sense": ">=", "hard": True,
+            "rhs_ratio": 0.5, "rhs_s": -4.0,
+        })
+        # 0.5 周期 − 4 秒；C = 90 → 41。
+        self.assertAlmostEqual(c.rhs_for_cycle(90.0), 41.0, places=6)
+        t = ConstraintTemplate.from_obj({
+            "id": "mixed_rhs_template", "scope": {}, "terms": [],
+            "sense": "<=", "hard": True, "rhs_ratio": 0.2, "rhs_s": 6.0,
+        })
+        self.assertAlmostEqual(t.rhs_for_cycle(90.0), 24.0, places=6)
+        with self.assertRaises(ValueError):
+            ConstraintSpec.from_obj({
+                "id": "no_rhs", "terms": [], "sense": ">=", "hard": True,
+            })
+
+    def test_combined_rhs_end_to_end(self):
+        # 强制带宽 == 0.3C − 5 = 22s。
+        d = _base_problem(margin=0.0)
+        d["global_constraints"] = [{
+            "id": "band_eq", "terms": [{"atom": {"kind": "bandwidth",
+                                                 "demand": "GW_up"}, "coef": 1.0}],
+            "sense": "==", "rhs_ratio": 0.3, "rhs_s": -5.0, "hard": True}]
+        out = run(d)
+        grid = out["grid_results"][0]
+        self.assertEqual(grid["status"], "optimal")
+        self.assertAlmostEqual(grid["bandwidth_objective_s"], 22.0, places=3)
+
     def test_time_space_diagram_render(self):
         import os
         import tempfile

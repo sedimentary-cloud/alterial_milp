@@ -263,6 +263,8 @@ class SoftPenalty:
 def _parse_rhs_fields(obj: Mapping[str, Any]) -> tuple[float | None, float | None]:
     """把统一写法 ``rhs + rhs_unit`` 与旧写法 ``rhs_s/rhs_ratio`` 解析成内部字段。
 
+    ``rhs_s`` 与 ``rhs_ratio`` 可以同时提供：建模时 RHS = rhs_ratio×C + rhs_s。
+
     - rhs_unit == "s"      -> rhs_s
     - rhs_unit == "ratio"  -> rhs_ratio
     - 未写 rhs_unit 时，``rhs`` 默认按秒处理，保持旧 JSON 兼容。
@@ -302,8 +304,10 @@ class ConstraintSpec:
     def __post_init__(self) -> None:
         if self.sense not in ("<=", ">=", "=="):
             raise ValueError(f"unknown constraint sense {self.sense!r}")
-        if (self.rhs_s is None) == (self.rhs_ratio is None):
-            raise ValueError("exactly one of rhs_s / rhs_ratio must be provided")
+        if self.rhs_s is None and self.rhs_ratio is None:
+            raise ValueError(
+                "rhs_s and rhs_ratio cannot both be missing; they are additive "
+                "when both are provided (rhs = rhs_ratio*C + rhs_s)")
         if self.hard:
             if self.soft is not None:
                 raise ValueError("hard constraint must not carry soft penalty")
@@ -312,10 +316,13 @@ class ConstraintSpec:
                 raise ValueError("soft constraint requires soft penalty")
 
     def rhs_for_cycle(self, cycle_s: float) -> float:
+        """RHS = rhs_ratio × C + rhs_s（两项都可选，同时给就是相加）。"""
+        total = 0.0
+        if self.rhs_ratio is not None:
+            total += self.rhs_ratio * cycle_s
         if self.rhs_s is not None:
-            return self.rhs_s
-        assert self.rhs_ratio is not None
-        return self.rhs_ratio * cycle_s
+            total += self.rhs_s
+        return total
 
     @classmethod
     def from_obj(cls, obj: Any) -> "ConstraintSpec":
@@ -408,8 +415,10 @@ class ConstraintTemplate:
     def __post_init__(self) -> None:
         if self.sense not in ("<=", ">=", "=="):
             raise ValueError(f"unknown constraint sense {self.sense!r}")
-        if (self.rhs_s is None) == (self.rhs_ratio is None):
-            raise ValueError("exactly one of rhs_s / rhs_ratio must be provided")
+        if self.rhs_s is None and self.rhs_ratio is None:
+            raise ValueError(
+                "rhs_s and rhs_ratio cannot both be missing; they are additive "
+                "when both are provided (rhs = rhs_ratio*C + rhs_s)")
         if self.hard:
             if self.soft is not None:
                 raise ValueError("hard constraint template must not carry soft penalty")
@@ -418,10 +427,13 @@ class ConstraintTemplate:
                 raise ValueError("soft constraint template requires soft penalty")
 
     def rhs_for_cycle(self, cycle_s: float) -> float:
+        """RHS = rhs_ratio × C + rhs_s（两项都可选，同时给就是相加）。"""
+        total = 0.0
+        if self.rhs_ratio is not None:
+            total += self.rhs_ratio * cycle_s
         if self.rhs_s is not None:
-            return self.rhs_s
-        assert self.rhs_ratio is not None
-        return self.rhs_ratio * cycle_s
+            total += self.rhs_s
+        return total
 
     @classmethod
     def from_obj(cls, obj: Any) -> "ConstraintTemplate":

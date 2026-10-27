@@ -883,7 +883,7 @@ class ConstraintSpec(BaseModel, frozen=True):
     terms: tuple[LinearTerm, ...]
     sense: Literal["<=", ">=", "=="]
     rhs_s: float | None = None      # 秒值
-    rhs_ratio: float | None = None  # 比例值，预处理换算 rhs_s = rhs_ratio × C；二者恰填其一
+    rhs_ratio: float | None = None  # 比例值；RHS = rhs_ratio × C + rhs_s（两者可同时给，至少一个）
     hard: bool
     soft: SoftPenalty | None = None
     # 校验器：hard=True ⟹ soft 为 None；hard=False ⟹ soft 必填
