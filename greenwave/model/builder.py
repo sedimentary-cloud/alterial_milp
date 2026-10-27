@@ -34,8 +34,8 @@ from ..schema.models import (BandDemandSpec, ConstraintSpec, ConstraintTemplate,
 from .constraints import ConstraintMeta, ConstraintStore
 from . import naming
 from .expressions import LinearExpr
-from .meta import (BalancedGroupModel, BigMTable, BoundarySlackRef,
-                   GreenDemandModel, MarginSlackRef, ModelMeta,
+from .meta import (AggregateModel, BalancedGroupModel, BigMTable,
+                   BoundarySlackRef, GreenDemandModel, MarginSlackRef, ModelMeta,
                    RedBoundarySlackRef, RedDemandModel, SoftPenaltyRef)
 from .variables import GVarType, VarHandle, VariableRegistry
 from .windows import EffectiveWindowBuilder, EffectiveWindowSet, RedWindowBuilder
@@ -120,6 +120,15 @@ class ArterialModel:
             pen = float(getattr(g.group, "min_existing_penalty_s", 0.0))
             if g.deficit is not None and pen > 0:
                 expr.add(g.deficit, -pen)
+        # 具名聚合的贡献：band objective 只取 target=band_objective 的项。
+        for am in self.meta.aggregates.values():
+            value = self._aggregate_expr_value(am)
+            for c in am.spec.contributions:
+                if c.target != "band_objective":
+                    continue
+                # min 是奖励（+），max 是罚项（−）；两者都把 t 推向正确方向。
+                sign = 1.0 if am.spec.op == "min" else -1.0
+                expr.add(value, sign * c.weight)
         return expr
 
     def expr_loss(self) -> LinearExpr:
@@ -127,7 +136,21 @@ class ArterialModel:
         for ref in self.meta.soft:
             if ref.owner == "intersection_loss":
                 expr.add(self.vars.by_name(ref_label(ref)), ref.coef)
+        # 具名聚合的贡献：路口损失（最小化）里，min 是奖励（负项）、max 是罚项。
+        for am in self.meta.aggregates.values():
+            value = self._aggregate_expr_value(am)
+            for c in am.spec.contributions:
+                if c.target != "intersection_loss":
+                    continue
+                sign = -1.0 if am.spec.op == "min" else 1.0
+                expr.add(value, sign * c.weight)
         return expr
+
+    @staticmethod
+    def _aggregate_expr_value(am: AggregateModel) -> LinearExpr:
+        if am.var is not None:
+            return LinearExpr.of(am.var, 1.0)
+        return LinearExpr.constant(am.constant)
 
 
 def ref_label(ref: SoftPenaltyRef) -> str:
@@ -159,6 +182,7 @@ class ModelBuilder:
         self._build_plan_selection()
         self._build_offsets()
         self._build_adjustments()
+        self._build_aggregates()
         ew_builder = EffectiveWindowBuilder(self.problem, self.ctx, self.vars, self.cons,
                                             self.meta.plan_vars,
                                             self.meta.boundary_delta,
@@ -248,6 +272,89 @@ class ModelBuilder:
                                                     p.id, d, j)
                         self.meta.plan_boundary[(p.id, d, j)] = expr
 
+    def _build_aggregates(self) -> None:
+        """具名聚合：t = max/min(e_i)，t 通过 contributions 进目标/损失。
+
+        只有 boundary/const 原子；所有 boundary 必须属于 ``spec.plan``。
+        多方案路口用 x_p 门控：未选中时 t=0（贡献 0）。
+        绑定的 plan 在本格点不可行时（on_unavailable="zero"）t 取常数 0。
+        """
+        for spec in self.problem.aggregates:
+            plan = None
+            available = True
+            if spec.plan is not None:
+                try:
+                    plan = self.problem.plan(spec.plan)
+                except KeyError as exc:
+                    raise GWModelError(f"aggregate {spec.id!r} references unknown plan {spec.plan!r}") from exc
+                feasible_ids = {p.id for p in self.ctx.feasible_plans.get(plan.intersection, ())}
+                available = plan.id in feasible_ids
+            if not available:
+                self.meta.aggregates[spec.id] = AggregateModel(
+                    spec=spec, expressions=(), var=None, constant=0.0, available=False)
+                continue
+            exprs = tuple(self._aggregate_expr(terms) for terms in spec.expressions)
+            x = self.meta.plan_vars.get(plan.id) if plan is not None else None
+            # 只有“永远不会被方案选择影响”的聚合才能折叠成常数：
+            # plan 为空，或该路口是固定方案（没有 x_p）。
+            if all(e.is_constant() for e in exprs) and x is None:
+                values = [e.const for e in exprs]
+                const = max(values) if spec.op == "max" else min(values)
+                self.meta.aggregates[spec.id] = AggregateModel(
+                    spec=spec, expressions=exprs, var=None, constant=float(const),
+                    available=True)
+                continue
+
+            spans = [self._linear_bounds(e) for e in exprs]
+            lo_min = min(lo for lo, _ in spans)
+            hi_max = max(hi for _, hi in spans)
+            L = min(0.0, lo_min)
+            U = max(0.0, hi_max)
+            var = self.vars.add(naming.agg(spec.id), L, U, GVarType.CONTINUOUS,
+                                {"kind": "aggregate", "aggregate": spec.id,
+                                 "op": spec.op, "plan": plan.id if plan is not None else None})
+            if x is not None:
+                # 未选中时把 t 夹到 0（贡献自然为 0）。
+                self.cons.add(LinearExpr.of(var, 1.0).add(x, -L), ">=", 0.0,
+                              ConstraintMeta("AGG", f"{spec.id}:t>=Lx", {"aggregate": spec.id}))
+                self.cons.add(LinearExpr.of(var, 1.0).add(x, -U), "<=", 0.0,
+                              ConstraintMeta("AGG", f"{spec.id}:t<=Ux", {"aggregate": spec.id}))
+            if spec.op == "max":
+                M = hi_max - L + 1.0
+                for i, e in enumerate(exprs):
+                    row = LinearExpr.of(var, 1.0).add(e, -1.0)
+                    if x is not None:
+                        row.add(x, -M)
+                    self.cons.add(row, ">=", (-M if x is not None else 0.0),
+                                  ConstraintMeta("AGG", f"{spec.id}:max{i}", {"aggregate": spec.id}))
+            else:
+                M = U - lo_min + 1.0
+                for i, e in enumerate(exprs):
+                    row = LinearExpr.of(var, 1.0).add(e, -1.0)
+                    if x is not None:
+                        row.add(x, M)
+                    self.cons.add(row, "<=", (M if x is not None else 0.0),
+                                  ConstraintMeta("AGG", f"{spec.id}:min{i}", {"aggregate": spec.id}))
+            self.meta.aggregates[spec.id] = AggregateModel(
+                spec=spec, expressions=exprs, var=var, constant=0.0, available=True)
+
+    def _aggregate_expr(self, terms) -> LinearExpr:
+        expr = LinearExpr()
+        for t in terms:
+            a = t.atom
+            if a.kind == "boundary":
+                key = (a.plan, a.direction, a.index)
+                if key not in self.meta.plan_boundary:
+                    raise GWModelError(
+                        f"aggregate boundary {key} is not available at this grid point")
+                expr.add(self.meta.plan_boundary[key], t.coef)
+            elif a.kind == "const":
+                scale = self.C if a.unit == "ratio" else 1.0
+                expr.add_const(t.coef * float(a.const or 0.0) * scale)
+            else:
+                raise GWModelError(f"unsupported atom {a.kind!r} in aggregate expression")
+        return expr
+
     def _add_mccormick(self, x: VarHandle, delta: VarHandle, z: VarHandle,
                        lo: float, hi: float, plan_id: str, d: Direction, j: int) -> None:
         # z = x·δ，x 是 0/1，δ 在 [lo, hi]。
@@ -331,7 +438,8 @@ class ModelBuilder:
                 else:
                     raise GWModelError("red_duration atom requires a plan or red-window scope")
             elif a.kind == "const":
-                expr.add_const(t.coef * float(a.const or 0.0))
+                scale = self.C if a.unit == "ratio" else 1.0
+                expr.add_const(t.coef * float(a.const or 0.0) * scale)
             elif a.kind == "offset":
                 expr.add(self.meta.phi[a.intersection], t.coef)
             elif a.kind == "bandwidth":
@@ -399,7 +507,8 @@ class ModelBuilder:
             elif a.kind == "offset":
                 atom_ub = self.C
             elif a.kind == "const":
-                atom_ub = abs(float(a.const or 0.0))
+                scale = self.C if a.unit == "ratio" else 1.0
+                atom_ub = abs(float(a.const or 0.0)) * scale
             elif a.kind == "bandwidth":
                 atom_ub = self.C * (1 + 4)
             else:

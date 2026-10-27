@@ -81,7 +81,9 @@ def _stage1_worker(payload):
 def _solve_stage1(problem: ProblemInput, ctx: GridPointContext,
                   solver_cfg: SolverConfig) -> GridPointResult:
     """Stage 1：默认完整 MILP；开启 multistage 后走多阶段快速路径。"""
-    if solver_cfg.multistage.enabled:
+    # 具名聚合把跨路口的贡献写进目标/损失，语义分解的“子问题独立可加”
+    # 前提不再成立，直接回退完整 MILP。
+    if solver_cfg.multistage.enabled and not problem.aggregates:
         return _solve_stage1_multistage(problem, ctx, solver_cfg)
     return _solve_stage1_full_milp(problem, ctx, solver_cfg)
 

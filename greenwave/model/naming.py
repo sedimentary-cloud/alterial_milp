@@ -51,6 +51,7 @@ RW_UP_CYCLE: Final = "rw_up_cycle"    # 红带上游回绕周期下标 m
 RW_EDGE_START: Final = "rw_edge_start"  # 红波边界亲和（起点侧 slack）
 RW_EDGE_END: Final = "rw_edge_end"      # 红波边界亲和（终点侧 slack）
 
+AGG: Final = "agg"                    # 具名聚合（max/min 一组线性表达式）
 BAL_MIN: Final = "bal_min"            # 均衡组：组内归一化最小带宽 z
 BAL_PRESENT: Final = "bal_present"    # 均衡组：成员需求是否至少有一条带 y
 BAL_DEFICIT: Final = "bal_deficit"    # 均衡组：min_existing 短缺
@@ -64,7 +65,7 @@ ALL_FAMILIES: Final[tuple[str, ...]] = (
     GW_EDGE_LO, GW_EDGE_HI,
     RW_START, RW_WIDTH, RW_ON, RW_UP_WIN, RW_DOWN_WIN, RW_UP_CYCLE,
     RW_EDGE_START, RW_EDGE_END,
-    BAL_MIN, BAL_PRESENT, BAL_DEFICIT, SOFT_SLACK,
+    AGG, BAL_MIN, BAL_PRESENT, BAL_DEFICIT, SOFT_SLACK,
 )
 
 #: margin 短缺的两侧
@@ -195,6 +196,11 @@ def rw_edge_end(demand: str, slot: int, up_slot: int) -> str:
     return _fmt(RW_EDGE_END, demand, slot, up_slot)
 
 
+def agg(aggregate_id: str) -> str:
+    """具名聚合的标量变量名。"""
+    return _fmt(AGG, aggregate_id)
+
+
 def bal_min(group: str) -> str:
     """均衡组：组内归一化带宽的最小值 `z`。"""
     return _fmt(BAL_MIN, group)
@@ -293,7 +299,7 @@ __all__ = [
     "GW_MARGIN_LO", "GW_MARGIN_HI", "GW_EDGE_LO", "GW_EDGE_HI",
     "RW_START", "RW_WIDTH", "RW_ON", "RW_UP_WIN", "RW_DOWN_WIN",
     "RW_UP_CYCLE", "RW_EDGE_START", "RW_EDGE_END",
-    "BAL_MIN", "BAL_PRESENT", "BAL_DEFICIT", "SOFT_SLACK",
+    "AGG", "BAL_MIN", "BAL_PRESENT", "BAL_DEFICIT", "SOFT_SLACK",
     "ALL_FAMILIES", "MARGIN_SIDES",
     "plan_on", "offset", "bnd_delta", "bnd_xdelta", "win_avail",
     "gw_start", "gw_width", "gw_on", "gw_win", "gw_cycle",
@@ -301,6 +307,6 @@ __all__ = [
     "gw_edge_lo", "gw_edge_hi", "edge_name",
     "rw_start", "rw_width", "rw_on", "rw_up_win", "rw_down_win",
     "rw_up_cycle", "rw_edge_start", "rw_edge_end",
-    "bal_min", "bal_present", "bal_deficit", "soft_slack",
+    "agg", "bal_min", "bal_present", "bal_deficit", "soft_slack",
     "family_of", "keys_of", "is_family", "plan_of", "offset_intersection",
 ]

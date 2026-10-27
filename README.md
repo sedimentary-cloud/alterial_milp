@@ -193,6 +193,8 @@ tests/
 - 上行全局绿波 + 下行 5 个相邻对红波；
 - 方案硬约束、方案软约束（路口损失）；
 - 绿波带逐绿段 margin 短缺罚（写在 plan 的 `green_mask` 上）；
+- 具名聚合 `aggregates`：对 boundary 线性组合取 max/min，作为奖励/罚项计入
+  band objective 或 intersection loss（`contributions`），支持“最大化最小时长”这类均衡目标；
 - 全局硬约束（上行带宽 >= 15s）；
 - 全局软约束（上行带宽尽量 >= 20s）；
 - 中间路口可调绿灯结束点，首末路口只调周期偏置；

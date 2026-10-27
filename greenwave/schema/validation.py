@@ -462,6 +462,80 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                                               f"constraint template {tmpl.id!r} {a.kind} "
                                               f"must be unbound; use scope to select plan/direction/window",
                                               (tmpl.id,)))
+    # V13：具名聚合（boundary 的线性组合取 max/min，只通过 contributions 进目标/损失）。
+    agg_ids = [a.id for a in problem.aggregates]
+    if len(set(agg_ids)) != len(agg_ids):
+        issues.append(ValidationIssue("error", "V13", "aggregate ids must be unique"))
+    plans_by_id = {p.id: p for p in problem.plans}
+    for a in problem.aggregates:
+        if a.op not in ("max", "min"):
+            issues.append(ValidationIssue("error", "V13",
+                                          f"aggregate {a.id!r} op must be 'max' or 'min'", (a.id,)))
+        if a.plan is not None and a.plan not in plans_by_id:
+            issues.append(ValidationIssue("error", "V13",
+                                          f"aggregate {a.id!r} references unknown plan {a.plan!r}",
+                                          (a.id,)))
+        for i, terms in enumerate(a.expressions):
+            if not terms:
+                issues.append(ValidationIssue("error", "V13",
+                                              f"aggregate {a.id!r} expression {i} is empty",
+                                              (a.id,)))
+                continue
+            for t in terms:
+                at = t.atom
+                if at.kind == "const":
+                    continue
+                if at.kind != "boundary":
+                    issues.append(ValidationIssue(
+                        "error", "V13",
+                        f"aggregate {a.id!r} only supports boundary/const atoms, got {at.kind!r}",
+                        (a.id,)))
+                    continue
+                if a.plan is None:
+                    issues.append(ValidationIssue(
+                        "error", "V13",
+                        f"aggregate {a.id!r} has boundary atoms but no plan binding",
+                        (a.id,)))
+                    continue
+                if at.plan != a.plan:
+                    issues.append(ValidationIssue(
+                        "error", "V13",
+                        f"aggregate {a.id!r} boundary atom belongs to plan {at.plan!r}, "
+                        f"expected {a.plan!r}", (a.id,)))
+                p = plans_by_id.get(at.plan)
+                if p is None:
+                    continue
+                if at.intersection is not None and at.intersection != p.intersection:
+                    issues.append(ValidationIssue(
+                        "error", "V13",
+                        f"aggregate {a.id!r} boundary intersection {at.intersection!r} "
+                        f"does not match plan intersection {p.intersection!r}", (a.id,)))
+                d = at.direction
+                if d not in ("up", "down"):
+                    issues.append(ValidationIssue(
+                        "error", "V13",
+                        f"aggregate {a.id!r} boundary direction must be up/down", (a.id,)))
+                    continue
+                if at.index is None or at.index < 0 or at.index >= p.boundary_count(d):
+                    issues.append(ValidationIssue(
+                        "error", "V13",
+                        f"aggregate {a.id!r} boundary index out of range for plan {p.id!r}/{d}",
+                        (a.id,)))
+        if not a.contributions:
+            issues.append(ValidationIssue(
+                "warning", "V13",
+                f"aggregate {a.id!r} has no contributions (unused)", (a.id,)))
+        for c in a.contributions:
+            if c.target not in ("band_objective", "intersection_loss"):
+                issues.append(ValidationIssue(
+                    "error", "V13",
+                    f"aggregate {a.id!r} has invalid contribution target {c.target!r}",
+                    (a.id,)))
+            if c.weight <= 0.0:
+                issues.append(ValidationIssue(
+                    "error", "V13",
+                    f"aggregate {a.id!r} contribution weight must be > 0", (a.id,)))
+
     return issues
 
 

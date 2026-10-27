@@ -391,7 +391,7 @@ class GreedyConstructor:
                 val = self._edge_duration_s(plan, a.direction, r.start_edge, r.end_edge,
                                             r.wrap, witness)
             elif a.kind == "const":
-                val = float(a.const or 0.0)
+                val = float(a.const or 0.0) * (self.C if a.unit == "ratio" else 1.0)
             else:
                 val = 0.0
             lhs += t.coef * val
@@ -484,7 +484,8 @@ class GreedyConstructor:
             if a.kind == "offset":
                 total += t.coef * offsets.get(a.intersection, 0.0)
             elif a.kind == "const":
-                total += t.coef * float(a.const or 0.0)
+                scale = self.C if a.unit == "ratio" else 1.0
+                total += t.coef * float(a.const or 0.0) * scale
             elif a.kind == "bandwidth":
                 total += t.coef * sum(bd.width_s for bd in bands if bd.demand == a.demand)
             else:
@@ -499,6 +500,40 @@ class GreedyConstructor:
         if c.sense == ">=":
             return max(0.0, rhs - lhs)
         return abs(lhs - rhs)
+
+    def _aggregate_value(self, spec, selection) -> float:
+        """按当前构造解算具名聚合的真实 max/min 值。
+
+        绑定的 plan 未选中/本格点不可行时返回 0（与建模器的 on_unavailable
+        策略和 x_p 门控一致）。
+        """
+        plan = None
+        if spec.plan is not None:
+            try:
+                plan = self.problem.plan(spec.plan)
+            except KeyError:
+                return 0.0
+            feasible_ids = {p.id for p in self.ctx.feasible_plans.get(plan.intersection, ())}
+            if plan.id not in feasible_ids or selection.get(plan.intersection) != plan.id:
+                return 0.0
+        witness = self._witness.get(plan.id, {}) if plan is not None else {}
+        values = []
+        for terms in spec.expressions:
+            total = 0.0
+            for t in terms:
+                a = t.atom
+                if a.kind == "boundary":
+                    p = self.problem.plan(a.plan) if a.plan is not None else plan
+                    if p is None:
+                        continue
+                    total += t.coef * (
+                        p.nominal_boundary_r(a.direction, a.index)
+                        + witness.get((a.direction, a.index), 0.0)) * self.C
+                elif a.kind == "const":
+                    scale = self.C if a.unit == "ratio" else 1.0
+                    total += t.coef * float(a.const or 0.0) * scale
+            values.append(total)
+        return max(values) if spec.op == "max" else min(values)
 
     def _evaluate(self, selection, offsets, bands) -> tuple[float, float, float]:
         """计算一个贪心方案的 composite、路口损失和总带宽。"""
@@ -563,7 +598,21 @@ class GreedyConstructor:
                 deficit = max(0, g.min_existing - actual)
                 balanced_reward -= g.min_existing_penalty_s * deficit
 
-        composite = reward - margin_pen - edge_pen - composite_soft + balanced_reward
+        # 具名聚合：按选中方案 + witness δ 算真实值，再按贡献方向计入。
+        aggregate_band = 0.0
+        aggregate_loss = 0.0
+        for spec in self.problem.aggregates:
+            value = self._aggregate_value(spec, selection)
+            for c in spec.contributions:
+                if c.target == "band_objective":
+                    sign = 1.0 if spec.op == "min" else -1.0
+                    aggregate_band += sign * c.weight * value
+                else:
+                    sign = -1.0 if spec.op == "min" else 1.0
+                    aggregate_loss += sign * c.weight * value
+        composite = (reward - margin_pen - edge_pen - composite_soft
+                     + balanced_reward + aggregate_band)
+        loss += aggregate_loss
         return composite, loss, reward
 
     def _make_solution(self, selection, offsets, bands) -> GreedySolution:

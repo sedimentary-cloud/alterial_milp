@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from ..preprocess.context import GridPointContext
-from ..schema.models import BandDemandSpec, Direction, ProblemInput, Side
+from ..schema.models import (AggregateSpec, BandDemandSpec, Direction,
+                             ProblemInput, Side)
 from .constraints import ConstraintMeta
 from .expressions import LinearExpr
 from .variables import VarHandle
@@ -107,6 +108,16 @@ class RedDemandModel:
     m_shift: dict[int, VarHandle] = field(default_factory=dict)
 
 
+# 一个具名聚合：max/min 一组线性表达式，得到标量 agg 变量（或常数）。
+@dataclass
+class AggregateModel:
+    spec: AggregateSpec
+    expressions: tuple[LinearExpr, ...] = ()
+    var: VarHandle | None = None
+    constant: float = 0.0
+    available: bool = True       # 绑定的 plan 在当前格点是否可行
+
+
 # 整个模型的元数据总表。
 
 # 一个均衡组：z 是组内最小带宽，y_b 表示需求 b 是否存在。
@@ -144,6 +155,7 @@ class ModelMeta:
     green_boundary: list[BoundarySlackRef] = field(default_factory=list)
     plan_constraints: list[tuple[str, ConstraintMeta]] = field(default_factory=list)
     balanced: dict[str, BalancedGroupModel] = field(default_factory=dict)
+    aggregates: dict[str, AggregateModel] = field(default_factory=dict)
 
     def effective_slot_vars(self, intersection: str, d: Direction):
         return self.effective[(intersection, d)]
@@ -153,5 +165,5 @@ RedBoundarySlackRef = BoundarySlackRef
 
 
 __all__ = ["BigMTable", "SoftPenaltyRef", "MarginSlackRef", "BoundarySlackRef",
-           "RedBoundarySlackRef",
-           "GreenDemandModel", "RedDemandModel", "BalancedGroupModel", "ModelMeta"]
+           "RedBoundarySlackRef", "GreenDemandModel", "RedDemandModel",
+           "BalancedGroupModel", "AggregateModel", "ModelMeta"]

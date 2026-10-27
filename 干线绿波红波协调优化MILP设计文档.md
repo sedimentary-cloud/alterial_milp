@@ -335,6 +335,37 @@ boundary(intersection, plan, direction, index)
 | V8 | 周期、速度、距离为正；倍率 > 0 |
 | V9 | 每个路口至少 1 个方案（格点级可行性由 §5 判定） |
 | V10 | 绿段 margin：`delta_min_s ≥ 0`、`hard_min_s ≥ 0`、`hard_min_s ≤ delta_min_s`、小于窗口宽度；同色边界/红段上的 margin 给警告并忽略 |
+| V13 | 具名聚合：id 唯一、op ∈ {max,min}、表达式只允许 boundary/const、boundary 必须绑定同一 plan 且下标合法、contributions 的 target/weight 合法 |
+
+### 3.10 AggregateSpec（具名聚合）
+
+```json
+{
+  "id": "min_phase_len",
+  "op": "min",
+  "plan": "I1_P1",
+  "expressions": [
+    [{"atom": {"kind": "boundary", "intersection": "I1", "plan": "I1_P1",
+               "direction": "up", "index": 0}, "coef": 1.0}],
+    [{"atom": {"kind": "const", "const": 0.5, "unit": "ratio"}, "coef": 1.0},
+     {"atom": {"kind": "boundary", "intersection": "I1", "plan": "I1_P1",
+               "direction": "up", "index": 0}, "coef": -1.0}]
+  ],
+  "contributions": [
+    {"target": "intersection_loss", "weight": 1.0}
+  ]
+}
+```
+
+- `op`：`max` / `min`；
+- `expressions`：每条表达式是 boundary 的线性组合 + 常数项；`const` 原子可带
+  `unit`（`s` 默认 / `ratio` 乘 C），同一个表达式可混用多个常数；
+- `plan`：所有 boundary 原子必须属于该方案（`plan=null` 时只能是纯常数表达式）；
+  方案在本格点不可行时聚合不可用（`on_unavailable="zero"`）；
+- `contributions`：`{target, weight}`，`target ∈ {band_objective, intersection_loss}`，
+  `weight > 0`；符号由 `op` 与 `target` 自动决定（见 4.4）；
+- 聚合只用于目标/损失，**不能出现在约束里**；硬约束直接写
+  `plan.hard_constraints` 的线性行（`min(E) ≥ B` 等价于每条 `e_i ≥ B`）。
 
 ---
 
@@ -563,12 +594,20 @@ u_{b,q} + β_{b,q} ≤ u_{b,q2} + M·(2 − e_{b,q} − e_{b,q2})    ∀ q < q2
 composite = Σ_b weight_b · Σ_q β_{b,q}
           − Σ_{b(green),q,j,p} coef_p · (σ^{m,s}_{b,q,j,p} + σ^{m,e}_{b,q,j,p})
           − Σ_{c ∈ soft, owner=composite} coef_c · σ_c
+          + Σ_{a: target=band_objective} sign_a · w_a · t_a
 
-L         = Σ_{c ∈ soft, owner=intersection_loss} coef_c · σ_c
+L_raw     = Σ_{c ∈ soft, owner=intersection_loss} coef_c · σ_c
+L_agg     = Σ_{a: target=intersection_loss} sign_a · w_a · t_a
+L         = L_raw + L_agg
 ```
 
+其中 `t_a` 是具名聚合值：`min` 用上包络 `t_a ≤ e_i`、`max` 用下包络 `t_a ≥ e_i`；
+`sign_a` 由 op 与 target 决定（min→band: +，min→loss: −，max→band: −，max→loss: +）。
+多方案路口用 `x_p` 门控，未选中时 `t_a = 0`；方案在格点不可行时也按 0。
+
 - 单位统一为秒；margin 短缺与软罚的系数无量纲；
-- 簿记规则：**margin 类罚项全部归 composite**（已锁定）；方案内端点软约束全部归 L；用户全局软约束按声明的 owner 归集。
+- 簿记规则：**margin 类罚项全部归 composite**（已锁定）；方案内端点软约束全部归 L；用户全局软约束与聚合贡献按声明的 owner 归集；
+- `L` 可以因为聚合奖励而为负，报告里同时给 `raw_intersection_loss_s` / `aggregate_loss_s`。
 
 ### 4.5 两阶段求解
 

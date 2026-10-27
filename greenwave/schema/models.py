@@ -183,6 +183,8 @@ class AtomRef:
     window: int | None = None         # derived window index / red rid
     demand: str | None = None
     const: float | None = None
+    # 只有 const 原子用：'s'（默认，秒）或 'ratio'（乘周期 C）。
+    unit: Unit | None = None
 
     def __post_init__(self) -> None:
         if self.kind == "offset":
@@ -213,6 +215,11 @@ class AtomRef:
                 raise ValueError("const atom requires const")
         else:  # pragma: no cover - Literal is developer-facing
             raise ValueError(f"unknown atom kind {self.kind!r}")
+        if self.unit is not None:
+            if self.kind != "const":
+                raise ValueError("atom unit is only allowed on const atoms")
+            if self.unit not in ("s", "ratio"):
+                raise ValueError(f"const atom unit must be 's' or 'ratio', got {self.unit!r}")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "AtomRef":
@@ -229,6 +236,7 @@ class AtomRef:
             window=int(obj["window"]) if obj.get("window") is not None else None,
             demand=obj.get("demand"),
             const=_num(obj["const"], "const") if obj.get("const") is not None else None,
+            unit=obj.get("unit"),
         )
 
 
@@ -1043,6 +1051,86 @@ class ParetoConfig:
                    int(obj.get("topk_grids", 1)))
 
 
+# 一个聚合贡献项：把聚合值按权重计入 band objective（composite）或路口损失。
+# 符号由 op 与 target 自动决定，用户只写正权重：
+#   target = band_objective   (composite 最大化)：min → +w·t，max → -w·t
+#   target = intersection_loss (L 最小化)：      min → -w·t，max → +w·t
+# 四种组合都精确（都把 t 推向其包络的正确方向）。
+@dataclass(frozen=True)
+class AggregateContributionSpec:
+    target: Literal["band_objective", "intersection_loss"]
+    weight: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.target not in ("band_objective", "intersection_loss"):
+            raise ValueError(f"unknown aggregate contribution target {self.target!r}")
+        if self.weight <= 0.0:
+            raise ValueError("aggregate contribution weight must be > 0")
+
+    @classmethod
+    def from_obj(cls, obj: Any) -> "AggregateContributionSpec":
+        if isinstance(obj, AggregateContributionSpec):
+            return obj
+        if not isinstance(obj, Mapping):
+            raise ValueError(f"aggregate contribution must be an object, got {obj!r}")
+        return cls(target=str(obj["target"]),
+                   weight=_num(obj.get("weight", 1.0), "weight"))
+
+    def to_obj(self) -> dict[str, Any]:
+        return {"target": self.target, "weight": self.weight}
+
+
+# 一个具名聚合：对一组线性表达式取 max/min，得到一个标量值 t，
+# 再通过 contributions 计入目标/损失。表达式只允许 boundary/const 原子；
+# 所有 boundary 原子必须属于同一个 plan（`plan` 字段）。
+@dataclass(frozen=True)
+class AggregateSpec:
+    id: str
+    op: Literal["max", "min"]
+    expressions: tuple[tuple[LinearTerm, ...], ...]
+    plan: str | None = None
+    contributions: tuple[AggregateContributionSpec, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.op not in ("max", "min"):
+            raise ValueError(f"aggregate op must be 'max' or 'min', got {self.op!r}")
+        if not self.expressions:
+            raise ValueError("aggregate requires at least one expression")
+        for i, terms in enumerate(self.expressions):
+            if not terms:
+                raise ValueError(f"aggregate {self.id!r} expression {i} is empty")
+            for t in terms:
+                if t.atom.kind not in ("boundary", "const"):
+                    raise ValueError(
+                        f"aggregate {self.id!r} only supports boundary/const atoms, "
+                        f"got {t.atom.kind!r}")
+
+    @classmethod
+    def from_obj(cls, obj: Any) -> "AggregateSpec":
+        if isinstance(obj, AggregateSpec):
+            return obj
+        if not isinstance(obj, Mapping):
+            raise ValueError(f"aggregate must be an object, got {obj!r}")
+        raw_exprs = obj.get("expressions", ())
+        expressions = tuple(tuple(LinearTerm.from_obj(t) for t in terms)
+                            for terms in raw_exprs)
+        contributions = tuple(AggregateContributionSpec.from_obj(c)
+                              for c in obj.get("contributions", ()))
+        return cls(id=str(obj["id"]),
+                   op=obj.get("op", "min"),
+                   expressions=expressions,
+                   plan=(str(obj["plan"]) if obj.get("plan") is not None else None),
+                   contributions=contributions)
+
+    def to_obj(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "op": self.op, "plan": self.plan,
+            "expressions": [[{"atom": _atom_obj(t.atom), "coef": t.coef}
+                             for t in terms] for terms in self.expressions],
+            "contributions": [c.to_obj() for c in self.contributions],
+        }
+
+
 # 目标配置：所有带需求、默认 margin、Pareto 配置、窗口共享开关。
 @dataclass(frozen=True)
 class ObjectiveConfig:
@@ -1206,6 +1294,8 @@ class ProblemInput:
     solver: SolverConfig = field(default_factory=SolverConfig)
     global_constraints: tuple[ConstraintSpec, ...] = ()
     constraint_templates: tuple[ConstraintTemplate, ...] = ()
+    # 具名聚合（boundary 的线性组合取 max/min），只通过 contributions 进目标/损失。
+    aggregates: tuple[AggregateSpec, ...] = ()
 
     # -- convenience lookups -----------------------------------------------------
     def plan(self, plan_id: str) -> PlanSpec:
@@ -1256,10 +1346,18 @@ class ProblemInput:
             global_constraints=tuple(ConstraintSpec.from_obj(c) for c in obj.get("global_constraints", ())),
             constraint_templates=tuple(ConstraintTemplate.from_obj(c)
                                        for c in obj.get("constraint_templates", ())),
+            aggregates=tuple(AggregateSpec.from_obj(a)
+                             for a in obj.get("aggregates", ())),
         )
 
     # pydantic-like alias for readability at call sites
     model_dump = None  # replaced below by method; placeholder for type checkers
+
+
+def _atom_obj(a: AtomRef) -> dict[str, Any]:
+    return {"kind": a.kind, "intersection": a.intersection, "plan": a.plan,
+            "direction": a.direction, "index": a.index, "window": a.window,
+            "demand": a.demand, "const": a.const, "unit": a.unit}
 
 
 def _edge_obj(spec: EdgeSpec | None) -> dict[str, Any] | None:
@@ -1280,16 +1378,7 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
     def cmap(c: ConstraintSpec | ConstraintTemplate) -> dict[str, Any]:
         out = {
             "id": c.id,
-            "terms": [{"atom": a, "coef": t.coef} for t in c.terms for a in [{
-                "kind": t.atom.kind,
-                "intersection": t.atom.intersection,
-                "plan": t.atom.plan,
-                "direction": t.atom.direction,
-                "index": t.atom.index,
-                "window": t.atom.window,
-                "demand": t.atom.demand,
-                "const": t.atom.const,
-            }]],
+            "terms": [{"atom": _atom_obj(t.atom), "coef": t.coef} for t in c.terms],
             "sense": c.sense,
             "hard": c.hard,
             "rhs_s": c.rhs_s,
@@ -1368,6 +1457,7 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
         },
         "global_constraints": [cmap(c) for c in self.global_constraints],
         "constraint_templates": [cmap(c) for c in self.constraint_templates],
+        "aggregates": [a.to_obj() for a in self.aggregates],
     }
 
 
@@ -1382,6 +1472,7 @@ __all__ = [
     "EdgeSpec", "BoundaryAffinitySpec",
     "RedEdgeSpec", "RedBoundarySpec",
     "BandDemandSpec",
-    "BalancedGroupSpec", "ParetoConfig", "ObjectiveConfig", "GridConfig", "HeuristicConfig",
+    "BalancedGroupSpec", "AggregateContributionSpec", "AggregateSpec",
+    "ParetoConfig", "ObjectiveConfig", "GridConfig", "HeuristicConfig",
     "SolverConfig", "MultistageConfig", "ProblemInput",
 ]

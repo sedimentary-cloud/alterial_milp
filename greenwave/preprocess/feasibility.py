@@ -81,7 +81,7 @@ class FeasibilityFilter:
                 end = self._edge_seconds(plan, a.direction, r.end_edge, cycle_s, deltas)
                 val = end + r.wrap * cycle_s - start
             elif a.kind == "const":
-                val = float(a.const or 0.0)
+                val = float(a.const or 0.0) * (cycle_s if a.unit == "ratio" else 1.0)
             else:
                 val = 0.0
             value += t.coef * val
@@ -224,7 +224,8 @@ class FeasibilityFilter:
                     for i, val in s_cf.items():
                         coefs[i] = coefs.get(i, 0.0) - t.coef * val
                 elif a.kind == "const":
-                    constant += t.coef * float(a.const or 0.0)
+                    scale = cycle_s if a.unit == "ratio" else 1.0
+                    constant += t.coef * float(a.const or 0.0) * scale
             add_sense(coefs, constant, c.sense, c.rhs_for_cycle(cycle_s), c.id)
 
         # 内置几何约束：排序 + min_phase_s。
