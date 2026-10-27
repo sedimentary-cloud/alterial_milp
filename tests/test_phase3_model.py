@@ -34,7 +34,6 @@ def _base(plans, demands, intersections=("I1", "I2", "I3"), segments=None, cycle
                                               _segment(intersections[1], intersections[2])]},
         "plans": plans,
         "objective": {"band_demands": demands,
-                      "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
                       "pareto": {"num_points": 1, "relax_max": 0.0, "topk_grids": 1}},
         "grid": {"cycles_s": [cycle], "speed_ratios": [1.0]},
         "solver": {"backend": "scipy", "time_limit_s": 20, "mip_rel_gap": 0.0,
@@ -57,8 +56,7 @@ class TestBoundaryModel(unittest.TestCase):
     def test_t1_green_wave_objective(self):
         plans = [_old_plan(i, [[0.0, 0.45]], [[0.0, 0.45]]) for i in ("I1", "I2", "I3")]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
-                    "nodes": ["I1", "I2", "I3"], "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0, "coef": 1.0}}]
+                    "nodes": ["I1", "I2", "I3"], "weight": 1.0}]
         _, _, model, result = _solve(_base(plans, demands))
         self.assertEqual(result.status.value, "optimal")
         self.assertAlmostEqual(model.expr_composite().evaluate(result.values), 40.5, places=4)
@@ -67,8 +65,7 @@ class TestBoundaryModel(unittest.TestCase):
         plans = [_old_plan(i, [[0.0, 0.2], [0.5, 0.7]], [[0.0, 0.2], [0.5, 0.7]])
                  for i in ("I1", "I2", "I3")]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
-                    "nodes": ["I1", "I2", "I3"], "max_bands": 2, "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0, "coef": 1.0}}]
+                    "nodes": ["I1", "I2", "I3"], "max_bands": 2, "weight": 1.0}]
         _, _, model, result = _solve(_base(plans, demands))
         self.assertAlmostEqual(model.expr_composite().evaluate(result.values), 36.0, places=3)
 
@@ -91,8 +88,7 @@ class TestBoundaryModel(unittest.TestCase):
             _old_plan("I3", [[0.0, 0.45]], [[0.0, 0.45]]),
         ]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
-                    "nodes": ["I1", "I2", "I3"], "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0, "coef": 1.0}}]
+                    "nodes": ["I1", "I2", "I3"], "weight": 1.0}]
         problem, ctx, model, result = _solve(_base(plans, demands))
         self.assertEqual(result.status.value, "optimal")
         # A single declared boundary delta is shared by both half-cycle copies.
@@ -119,8 +115,7 @@ class TestBoundaryModel(unittest.TestCase):
             "plans": [dc_plan("I1"), dc_plan("I2")],
             "objective": {"band_demands": [{"id": "GW_up", "type": "green",
                                             "direction": "up", "nodes": ["I1", "I2"],
-                                            "weight": 1.0,
-                                            "margin": {"delta_min_s": 0.0, "coef": 1.0}}],
+                                            "weight": 1.0}],
                           "pareto": {"num_points": 1, "relax_max": 0.0, "topk_grids": 1}},
             "grid": {"cycles_s": [100.0], "speed_ratios": [1.0]},
             "solver": {"backend": "scipy", "time_limit_s": 20, "mip_rel_gap": 0.0,
@@ -184,9 +179,7 @@ class TestBoundaryModel(unittest.TestCase):
             "plans": [plan, p2, p3],
             "objective": {"band_demands": [{"id": "GW_up", "type": "green",
                                             "direction": "up",
-                                            "nodes": ["I1", "I2", "I3"], "weight": 1.0,
-                                            "margin": {"delta_min_s": 0.0, "coef": 1.0}}],
-                          "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
+                                            "nodes": ["I1", "I2", "I3"], "weight": 1.0}],
                           "pareto": {"num_points": 1, "relax_max": 0.0, "topk_grids": 1}},
             "grid": {"cycles_s": [100.0], "speed_ratios": [1.0]},
             "solver": {"backend": "scipy", "time_limit_s": 20, "mip_rel_gap": 0.0,
@@ -231,7 +224,8 @@ class TestVariableNaming(unittest.TestCase):
             return {"id": pid, "intersection": iid, "double_cycle": False,
                     "min_phase_s": 0.001,
                     "directions": {d: {"boundaries": [dict(b) for b in bounds],
-                                       "green_mask": list(mask)} for d in ("up", "down")},
+                                       "green_mask": [{"green": bool(g)} for g in mask]}
+                                   for d in ("up", "down")},
                     "hard_constraints": list(hard), "soft_constraints": list(soft)}
 
         soft_c = {"id": "up_end_soft", "terms": [{"atom": {
@@ -244,6 +238,15 @@ class TestVariableNaming(unittest.TestCase):
                       adjust={1: [0.0, 0.05]}),
                  plan("I2_P1", "I2", [0.5], [True, False], adjust={0: [0.0, 0.1]}),
                  plan("I3_P1", "I3", [0.5], [True, False])]
+        # 让“逐绿段 margin”这一族变量真的出现（naming 覆盖测试用它）。
+        for p in plans:
+            for d in ("up", "down"):
+                for seg in p["directions"][d]["green_mask"]:
+                    if seg["green"]:
+                        seg["margin"] = {
+                            "start": {"delta_min_s": 5.0, "coef": 1.0, "hard_min_s": 1.0},
+                            "end": {"delta_min_s": 5.0, "coef": 1.0, "hard_min_s": 1.0},
+                        }
         return {
             "corridor": {"corridor_id": "naming", "intersections": ["I1", "I2", "I3"],
                          "segments": [_segment("I1", "I2", 300.0, 15.0),
@@ -252,15 +255,13 @@ class TestVariableNaming(unittest.TestCase):
             "objective": {
                 "band_demands": [
                     {"id": "GW_up", "type": "green", "direction": "up",
-                     "nodes": ["I1", "I2", "I3"], "max_bands": 1, "weight": 1.0,
-                     "margin": {"delta_min_s": 5.0, "coef": 1.0, "hard_min_s": 1.0}},
+                     "nodes": ["I1", "I2", "I3"], "max_bands": 1, "weight": 1.0},
                     {"id": "RW_dn", "type": "red", "direction": "down",
                      "nodes": ["I3", "I2"], "max_bands": 1, "weight": 1.0},
                 ],
                 "balanced_groups": [{"id": "BG", "demands": ["GW_up"], "weight": 1.0,
                                      "on_infeasible": "skip", "min_existing": 1,
                                      "min_existing_penalty_s": 1.0}],
-                "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
                 "red_boundary_default": {"start": {"free_s": 3.0, "coef": 0.2}},
                 "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1},
                 "allow_window_sharing": True,

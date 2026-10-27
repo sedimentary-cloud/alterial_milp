@@ -48,12 +48,11 @@ def _base_problem(cycle=90.0, plans=None, demands=None, margin=0.0,
     if demands is None:
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
                     "nodes": ["I1", "I2", "I3"], "max_bands": None,
-                    "weight": 1.0, "margin": {"delta_min_s": margin, "coef": 1.0}}]
+                    "weight": 1.0}]
     return {
         "corridor": corridor,
         "plans": plans,
         "objective": {"band_demands": demands,
-                      "margin_default": {"delta_min_s": margin, "coef": 1.0},
                       "pareto": pareto or {"num_points": 1, "relax_max": 0.0, "topk_grids": 1}},
         "grid": {"cycles_s": [cycle], "speed_ratios": [1.0]},
         "solver": solver or {"backend": "scipy", "time_limit_s": 30, "mip_rel_gap": 0.0,
@@ -87,9 +86,9 @@ class TestDocumentCases(unittest.TestCase):
         plans = [_plan(i, [[0.0, 0.45]], [[0.0, 0.45]]) for i in ("I1", "I2", "I3")]
         demands = [
             {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
-             "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+             "weight": 1.0},
             {"id": "GW_down", "type": "green", "direction": "down", "nodes": ["I3", "I2", "I1"],
-             "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+             "weight": 1.0},
         ]
         out = run(_base_problem(plans=plans, demands=demands, margin=0.0))
         self.assertAlmostEqual(self._composite(out), 81.0, places=3)
@@ -100,8 +99,7 @@ class TestDocumentCases(unittest.TestCase):
         plans = [_plan(i, [[0.0, 0.2], [0.5, 0.7]], [[0.0, 0.2], [0.5, 0.7]])
                  for i in ("I1", "I2", "I3")]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
-                    "nodes": ["I1", "I2", "I3"], "max_bands": 2, "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0}}]
+                    "nodes": ["I1", "I2", "I3"], "max_bands": 2, "weight": 1.0}]
         out = run(_base_problem(plans=plans, demands=demands, margin=0.0))
         self.assertAlmostEqual(self._composite(out), 36.0, places=3)
         bands = self._bands(out)
@@ -242,7 +240,6 @@ class TestDocumentCases(unittest.TestCase):
                  _plan("I3", [[0.0, 0.5]], [[0.0, 0.5]])]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
                     "nodes": ["I1", "I2", "I3"], "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0, "coef": 1.0},
                     "green_boundary": {"start": {"free_s": free_s, "coef": coef,
                                                  "hard_max_s": hard_max_s}}}]
         d = _base_problem(cycle=90.0, plans=plans, demands=demands, margin=0.0,
@@ -322,8 +319,7 @@ class TestDocumentCases(unittest.TestCase):
                  _plan("I2", [[0.0, 0.45]], [[0.0, 0.45]]),
                  _plan("I3", [[0.0, 0.45]], [[0.0, 0.45]])]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
-                    "nodes": ["I1", "I2", "I3"], "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0}}]
+                    "nodes": ["I1", "I2", "I3"], "weight": 1.0}]
         out = run(_base_problem(plans=plans, demands=demands, margin=0.0,
                                 pareto={"num_points": 2, "relax_max": 0.5, "topk_grids": 1}))
         self.assertAlmostEqual(self._composite(out), 40.5, places=3)
@@ -344,8 +340,7 @@ class TestDocumentCases(unittest.TestCase):
                  _plan("I2", [[0.0, 0.45]], [[0.0, 0.45]]),
                  _plan("I3", [[0.0, 0.45]], [[0.0, 0.45]])]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
-                    "nodes": ["I1", "I2", "I3"], "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0}}]
+                    "nodes": ["I1", "I2", "I3"], "weight": 1.0}]
         d = _base_problem(cycle=60.0, plans=plans, demands=demands, margin=0.0)
         d["grid"]["cycles_s"] = [60.0, 90.0]
         out = run(d)
@@ -363,8 +358,7 @@ class TestDocumentCases(unittest.TestCase):
                  _plan("I2", [[0.0, 0.45]], [[0.0, 0.45]]),
                  _plan("I3", [[0.0, 0.45]], [[0.0, 0.45]])]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
-                    "nodes": ["I1", "I2", "I3"], "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0}}]
+                    "nodes": ["I1", "I2", "I3"], "weight": 1.0}]
         d = _base_problem(plans=plans, demands=demands, margin=0.0)
         # solve model directly so we can inspect adjustments
         problem = ProblemInput.from_obj(d)
@@ -420,8 +414,7 @@ class TestDocumentCases(unittest.TestCase):
         plans = [_plan(i, [[0.0, 0.2], [0.5, 0.7]], [[0.0, 0.2], [0.5, 0.7]])
                  for i in ("I1", "I2", "I3")]
         demands = [{"id": "GW_up", "type": "green", "direction": "up",
-                    "nodes": ["I1", "I2", "I3"], "max_bands": 2, "weight": 1.0,
-                    "margin": {"delta_min_s": 0.0}}]
+                    "nodes": ["I1", "I2", "I3"], "max_bands": 2, "weight": 1.0}]
         d = _base_problem(plans=plans, demands=demands, margin=0.0)
         d["objective"]["allow_window_sharing"] = True
         out = run(d)
@@ -481,9 +474,9 @@ class TestDocumentCases(unittest.TestCase):
                  _plan("I2", [[0.0, 0.45]], [[0.0, 0.45]])]
         demands = [
             {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2"],
-             "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+             "weight": 1.0},
             {"id": "GW_down", "type": "green", "direction": "down", "nodes": ["I2", "I1"],
-             "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+             "weight": 1.0},
         ]
         d = _base_problem(plans=plans, demands=demands, margin=0.0, corridor=corridor)
         problem = ProblemInput.from_obj(d)
@@ -510,11 +503,9 @@ class TestDocumentCases(unittest.TestCase):
                  _plan("I3", [[0.0, 0.45]], [[0.0, 0.2]])]
         demands = [
             {"id": "GW_up", "type": "green", "direction": "up",
-             "nodes": ["I1", "I2", "I3"], "max_bands": 1, "weight": 1.0,
-             "margin": {"delta_min_s": 0.0}},
+             "nodes": ["I1", "I2", "I3"], "max_bands": 1, "weight": 1.0},
             {"id": "GW_down", "type": "green", "direction": "down",
-             "nodes": ["I3", "I2", "I1"], "max_bands": 1, "weight": 1.0,
-             "margin": {"delta_min_s": 0.0}},
+             "nodes": ["I3", "I2", "I1"], "max_bands": 1, "weight": 1.0},
         ]
         d = _base_problem(plans=plans, demands=demands, margin=0.0, corridor=corridor)
         d["objective"]["balanced_groups"] = [{

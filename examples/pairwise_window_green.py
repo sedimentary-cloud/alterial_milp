@@ -52,8 +52,7 @@ def _demand(did: str, direction: str, nodes: list[str], max_bands: int) -> dict:
     return {
         "id": did, "type": "green", "direction": direction, "nodes": list(nodes),
         "max_bands": max_bands, "weight": 1.0,
-        "margin": {"delta_min_s": 0.0, "coef": 1.0},
-    }
+        }
 
 
 def _pair_demands(full: dict, i: int, max_bands: int) -> list[dict]:
@@ -82,7 +81,6 @@ def _build_joint(full: dict, fixed: bool = True) -> ProblemInput:
     obj = raw["objective"]
     obj["band_demands"] = demands
     obj["balanced_groups"] = []
-    obj["margin_default"] = {"delta_min_s": 0.0, "coef": 1.0}
     obj["allow_window_sharing"] = True
     obj["pareto"] = {"num_points": 0, "relax_max": 0.0, "topk_grids": 1}
     raw["global_constraints"] = []
@@ -113,7 +111,6 @@ def _build_pair(full: dict, i: int, fixed: bool = True) -> ProblemInput:
     obj = raw["objective"]
     obj["band_demands"] = _pair_demands(raw, 0, mb)
     obj["balanced_groups"] = []
-    obj["margin_default"] = {"delta_min_s": 0.0, "coef": 1.0}
     obj["allow_window_sharing"] = True
     obj["pareto"] = {"num_points": 0, "relax_max": 0.0, "topk_grids": 1}
     raw["global_constraints"] = []

@@ -161,7 +161,7 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                     f"plan {p.id!r} {d} green_mask length must equal boundary count + 1",
                     (p.id, d)))
                 continue
-            n_true = sum(1 for x in dp.green_mask if x)
+            n_true = sum(1 for x in dp.mask_bool if x)
             if n_true == 0:
                 issues.append(ValidationIssue(
                     "error", "V2",
@@ -172,12 +172,79 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                     "error", "V2",
                     f"plan {p.id!r} {d} green_mask must contain at least one red interval",
                     (p.id, d)))
-            if dp.green_mask and dp.green_mask[0] and dp.green_mask[-1]:
+            if dp.mask_bool and dp.mask_bool[0] and dp.mask_bool[-1]:
                 issues.append(ValidationIssue(
                     "error", "V2",
                     f"plan {p.id!r} {d} green_mask first and last intervals cannot both be green; "
                     f"rotate the plan so a complete green interval lies inside one cycle",
                     (p.id, d)))
+            # V10：逐绿段的 margin 配置。
+            #   * 红段上的 margin 忽略；
+            #   * 同色边界（绿-绿 / 红-红）上的 margin 忽略；
+            #   * 数值合法性与“窗口宽度是否够”做常规检查。
+            segs = dp.green_mask
+            n_seg = len(segs)
+            mask_bool = dp.mask_bool
+            try:
+                windows = p.derived_windows(d)
+            except ValueError:
+                # 首尾都是绿的非法方案：V2 已经报错，这里不再重复检查。
+                windows = ()
+            max_cycle = max(problem.grid.cycles_s) if problem.grid.cycles_s else 0.0
+            for si, seg in enumerate(segs):
+                if not seg.green:
+                    if seg.margin_start is not None or seg.margin_end is not None:
+                        issues.append(ValidationIssue(
+                            "warning", "V10",
+                            f"plan {p.id!r} {d} segment {si} is red; its margin is ignored",
+                            (p.id, d, str(si))))
+                    continue
+                prev_green = mask_bool[si - 1]
+                next_green = mask_bool[(si + 1) % n_seg]
+                for side_name, spec, same_color, edge in (
+                        ("start", seg.margin_start, prev_green, si),
+                        ("end", seg.margin_end, next_green, si + 1)):
+                    if spec is None:
+                        continue
+                    if same_color:
+                        issues.append(ValidationIssue(
+                            "warning", "V10",
+                            f"plan {p.id!r} {d} segment {si} margin_{side_name} is on a "
+                            f"same-color boundary; ignored",
+                            (p.id, d, str(si))))
+                        continue
+                    if spec.delta_min_s < 0:
+                        issues.append(ValidationIssue(
+                            "error", "V10",
+                            f"plan {p.id!r} {d} segment {si} margin_{side_name} "
+                            f"delta_min_s must be >= 0", (p.id, d, str(si))))
+                    if spec.hard_min_s < 0:
+                        issues.append(ValidationIssue(
+                            "error", "V10",
+                            f"plan {p.id!r} {d} segment {si} margin_{side_name} "
+                            f"hard_min_s must be >= 0", (p.id, d, str(si))))
+                    if spec.hard_min_s > spec.delta_min_s:
+                        issues.append(ValidationIssue(
+                            "warning", "V10",
+                            f"plan {p.id!r} {d} segment {si} margin_{side_name} "
+                            f"hard_min_s > delta_min_s (soft target weaker than hard limit)",
+                            (p.id, d, str(si))))
+                    if spec.delta_min_s > 0 and max_cycle > 0:
+                        win = None
+                        for w in windows:
+                            if (side_name == "start" and w.start_edge == edge) or \
+                               (side_name == "end" and w.end_edge == edge):
+                                win = w
+                                break
+                        if win is not None:
+                            width_s = (win.end_r - win.start_r) * max_cycle
+                            if spec.delta_min_s >= width_s:
+                                issues.append(ValidationIssue(
+                                    "warning", "V10",
+                                    f"plan {p.id!r} {d} segment {si} margin_{side_name} "
+                                    f"delta_min_s={spec.delta_min_s:g}s >= window width "
+                                    f"({width_s:g}s at the largest cycle); target unreachable",
+                                    (p.id, d, str(si))))
             k_max = 3 if not p.double_cycle else 6
             try:
                 if p.window_count(d) > k_max:
@@ -277,46 +344,14 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
             issues.append(ValidationIssue("error", "V4", f"demand {b.id!r} max_bands must be >=1", (b.id,)))
         if b.weight < 0:
             issues.append(ValidationIssue("error", "V4", f"demand {b.id!r} weight must be >=0", (b.id,)))
-        # V10 warning
+        # V12：绿波边界亲和（贴合损失）的配置检查。
+        # margin 已移到 plan 的绿段上，demand 级不再有 margin，因此只检查
+        # “free_s 是否大到永远不生效”。
         if b.type == "green":
-            margin = problem.margin_for(b)
-            if margin.delta_min_s < 0:
-                issues.append(ValidationIssue("error", "V10", f"demand {b.id!r} delta_min_s must be >=0", (b.id,)))
-            if margin.hard_min_s < 0:
-                issues.append(ValidationIssue("error", "V10", f"demand {b.id!r} hard_min_s must be >=0", (b.id,)))
-            if margin.hard_min_s > margin.delta_min_s:
-                issues.append(ValidationIssue("warning", "V10",
-                                              f"demand {b.id!r} hard_min_s > delta_min_s; "
-                                              f"soft margin target is weaker than hard limit",
-                                              (b.id,)))
-            else:
-                widths = []
-                for node in b.nodes:
-                    for p in problem.plans_of(node):
-                        try:
-                            for w in p.effective_windows(b.direction):
-                                widths.append(w.width_r)
-                        except ValueError:
-                            continue
-                if widths and margin.delta_min_s >= min(widths):
-                    issues.append(ValidationIssue("warning", "V10",
-                                                  f"demand {b.id!r} delta_min_s >= min window width; margin target may be unreachable",
-                                                  (b.id,)))
-            # V12：绿波边界亲和（贴合损失）的配置检查。
-            #   free_s < delta_min_s → 亲和与 margin 在同一侧反向拉扯，
-            #   有效 margin 目标会被拉到 free_s；
-            #   free_s ≥ 最小窗宽 → 亲和项永远为 0（不起作用）。
             gb = problem.green_boundary_for(b)
             for side_name, side in (("start", gb.start), ("end", gb.end)):
                 if side is None or side.coef <= 0:
                     continue
-                if side.free_s < margin.delta_min_s:
-                    issues.append(ValidationIssue(
-                        "warning", "V12",
-                        f"demand {b.id!r} green boundary {side_name} free_s={side.free_s:g}s "
-                        f"< delta_min_s={margin.delta_min_s:g}s; affinity and margin pull "
-                        f"the same edge in opposite directions (effective margin target -> free_s)",
-                        (b.id,)))
                 widths = []
                 for node in b.nodes:
                     for p in problem.plans_of(node):

@@ -563,7 +563,7 @@ def _notes_section(payload: Mapping[str, Any]) -> str:
             ±{cfg['plan_span']:.3f}·C，脚本会按"硬约束常数行 + k 个方案都保留"
             自适应收缩），保持边界个数与绿掩码结构一致。</li>
         <li>清空 <code>global_constraints</code> 与 <code>constraint_templates</code>
-            （它们引用了本矩阵不存在的需求 id）；需求 margin 关掉；
+            （它们引用了本矩阵不存在的需求 id）；绿段 margin 关掉；
             方案自带 hard_constraints 与 <code>red_boundary_default</code> 保留；
             绿波边界亲和默认关闭，本矩阵不启用。</li>
       </ul>

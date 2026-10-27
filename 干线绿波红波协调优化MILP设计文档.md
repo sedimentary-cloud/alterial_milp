@@ -50,12 +50,12 @@
 | 绿波带（链式） | 一条时间区间，沿某方向连续穿过给定有序路口列表（≥ 2 个）中每个路口的某一个绿灯窗口；其宽度为该区间长度，由链上最紧的窗口决定，宽度计一次 |
 | 相邻对绿带 | 节点列表长度 = 2 的链式绿带（统一 schema 的特例） |
 | 红波带 | 上游路口**一个**绿灯窗口（平移行程时间 τ 后）与下游邻接路口**一个**红灯区间的重叠时间区间。**只能在相邻两个路口之间定义，结构上不可能穿过 3 个及以上路口连续传播**（越过下游路口后定义它的红灯区间已不存在） |
-| 带需求（BandDemand） | 用户声明的一条优化目标单元：{方向, 有序节点列表, 类型(绿/红), 每周期最大带数, 权重, margin 参数}。红带需求强制节点数 = 2 |
+| 带需求（BandDemand） | 用户声明的一条优化目标单元：{方向, 有序节点列表, 类型(绿/红), 每周期最大带数, 权重}。红带需求强制节点数 = 2；margin 不在需求上，而是逐方案、逐绿段配置 |
 | 窗口绿波 | 起讫路口为干线中间某两路口的链式绿带（部分干线绿波），与全程绿波同为链式带需求的特例 |
-| 相位边界 / green_mask | 方案把每个方向的周期用有序边界切成区间，`green_mask` 标记哪些区间对干线为绿灯；绿窗和红窗均为派生量（3.3） |
+| 相位边界 / green_mask | 方案把每个方向的周期用有序边界切成区间；`green_mask` 是**对象列表**，每项 `{green, margin}` 标记颜色与该绿段两端的 margin；绿窗和红窗均为派生量（3.3） |
 | composite band objective | 干线目标 = 所有带需求的带宽加权和 − margin 短缺罚 − owner 为 composite 的软约束罚（单位：秒） |
 | 路口损失（intersection loss） | 路口相位边界线性组合的软约束违反量 × 强度系数之和（单位：秒），仅选中方案激活 |
-| margin（端点净距） | 绿带端点到其所用绿灯窗口对应端点的距离；不足期望净距 δ_min 的部分计为短缺并罚款（红带无 margin） |
+| margin（端点净距） | 绿带端点到其所用绿灯窗口对应端点的距离；逐方案、逐绿段配置（绿窗口的起/终点分别取首/末绿段的配置），不足期望净距 δ_min 的部分计为短缺并罚款。红带无 margin；同色边界与红段上的配置忽略 |
 
 ### 1.4 多目标结构
 
@@ -96,7 +96,7 @@
 | `d ∈ {+, −}` | 方向，+ 上行（1→N），− 下行（N→1） |
 | `P_i` | 路口 i 的候选方案集合 |
 | `W_{i,p,d}` | 方案 p 在方向 d 的绿灯窗口列表（有序、不重叠） |
-| `K_{i,p,d} = |W_{i,p,d}|` | 窗口数，≤ 3（双周期复制后 ≤ 6） |
+| `K_{i,p,d} = \|W_{i,p,d}\|` | 窗口数，≤ 3（双周期复制后 ≤ 6） |
 | `B` | 带需求集合 |
 | `S_b = [n_1..n_m]` | 需求 b 的有序节点列表，**按行驶方向排序**（绿带 m ≥ 2，红带 m = 2） |
 | `Q_b` | 需求 b 每周期的最大带槽数（绿带默认 = 链上各路口最大窗口数的最小值；红带默认 3，可配） |
@@ -169,11 +169,16 @@
         {"pos_r": 0.2, "adjust": [-0.02, 0.02]},
         {"pos_r": 0.6}
       ],
-      "green_mask": [true, false, true, false]
+      "green_mask": [
+        {"green": true,
+         "margin": {"start": {"delta_min_s": 2.0, "coef": 1.0, "hard_min_s": 0.0},
+                    "end":   {"delta_min_s": 2.0, "coef": 1.0, "hard_min_s": 0.0}}},
+        {"green": false}, {"green": true}, {"green": false}
+      ]
     },
     "down": {
       "boundaries": [{"pos_r": 0.5}],
-      "green_mask": [true, false]
+      "green_mask": [{"green": true}, {"green": false}]
     }
   },
   "hard_constraints": [],
@@ -182,7 +187,9 @@
 ```
 
 - 单周期边界在 `(0, 1)`；双周期在 `(0, 0.5)`；声明边界数 ≤ 6。
-- `green_mask` 长度 = 边界数 + 1，方案内固定。
+- `green_mask` 长度 = 边界数 + 1，方案内固定；每项是对象 `{green, margin}`。
+  `margin.start/end` 可选，只有该段是绿、且边界两侧颜色不同时生效；
+  同色边界（绿-绿 / 红-红）与红段上的 margin 会被忽略（校验警告）。
 - 一个方向必须同时有绿区间和红区间；首尾区间不能同时为绿。
 - 绿窗 = 极大连续绿区间；红窗 = 整周期补集中的极大连续非绿区间。
 - 红窗允许跨 0/C 以及双周期的 0.5；跨 0/C 用 `wrap=1` 表示，不拆 ID。
@@ -223,9 +230,8 @@ boundary(intersection, plan, direction, index)
   "type": "green",              
   "direction": "up",
   "nodes": ["I1", "I2", "I3", "I4"],
-  "max_bands": null,            
-  "weight": 1.0,
-  "margin": { "delta_min_s": 2.0, "coef": 1.0 }
+  "max_bands": null,
+  "weight": 1.0
 }
 ```
 
@@ -233,8 +239,9 @@ boundary(intersection, plan, direction, index)
 - `nodes` 按行驶方向排序；
 - `max_bands`: null → 自动（绿带 = 链上各路口 `max_p K_{i,p,d}` 的最小值；红带 = 3）；
 - `weight`：目标中该需求聚合带宽的权重，默认 1.0；
-- `margin.delta_min_s`：期望净距（秒），红带忽略；全局默认值在 ObjectiveConfig 中，需求级可覆盖；
-- `margin.coef`：短缺罚系数，默认 1.0（短缺 1 秒 = 带宽 1 秒）。
+- **margin 不在 BandDemand 上**：它逐方案、逐绿段写在 `directions[d].green_mask` 里，
+  每段各有 `start` / `end` 一套 `{delta_min_s, coef, hard_min_s}`；
+  不配置 = 没有硬约束、也没有损失（不存在 demand 级或全局默认 margin）。
 
 目标配置示例的对应关系：
 
@@ -252,10 +259,11 @@ boundary(intersection, plan, direction, index)
 ```json
 {
   "band_demands": ["WB_up_full", "..."],
-  "margin_default": { "delta_min_s": 2.0, "coef": 1.0 },
   "pareto": { "num_points": 4, "relax_max": 0.3, "topk_grids": 1 }
 }
 ```
+
+（`margin_default` 已删除：margin 只存在于 plan 的绿段上。）
 
 ### 3.6 ConstraintExpr（约束表达式系统）
 
@@ -326,7 +334,7 @@ boundary(intersection, plan, direction, index)
 | V7 | 全局约束不得引用 boundary / window_duration / red_duration 原子 |
 | V8 | 周期、速度、距离为正；倍率 > 0 |
 | V9 | 每个路口至少 1 个方案（格点级可行性由 §5 判定） |
-| V10 | margin.delta_min_s ≥ 0 且小于链上最小窗口宽度（给出警告而非报错） |
+| V10 | 绿段 margin：`delta_min_s ≥ 0`、`hard_min_s ≥ 0`、`hard_min_s ≤ delta_min_s`、小于窗口宽度；同色边界/红段上的 margin 给警告并忽略 |
 
 ---
 
@@ -351,7 +359,7 @@ boundary(intersection, plan, direction, index)
 | `n_{b,q,j}` | 整数 [0, ⌈T_j^span/C⌉] | 绿带在节点 n_j 的回绕周期数；链首固定为 0 |
 | `ag_{b,q,g}` | 二进制 | 红带槽 q 的上游绿窗槽指派（只负责上游一侧） |
 | `ar_{b,q,r,k}` | 二进制 | 红带槽 q 的下游红窗实例指派（红窗槽 r + 下游周期偏移 k） |
-| `σ^{m,s}_{b,q,j}, σ^{m,e}_{b,q,j}` | 连续 ≥ 0 | 绿带在节点 n_j 的左/右端 margin 短缺 |
+| `σ^{m,s}_{b,q,j,p}, σ^{m,e}_{b,q,j,p}` | 连续 ≥ 0 | 绿带在节点 n_j、使用方案 p 的第 k 个窗口时的左/右端 margin 短缺（逐方案建 slack） |
 | `σ_c` | 连续 ≥ 0 | 软约束 c 的违反量 |
 
 ### 4.2 派生窗口重构（v2 关键工程决策）
@@ -448,15 +456,32 @@ u_{b,q} ≤ u_{b,q+1}                     ∀b, q = 1..Q_b−1        （按起�
 
 窗口独占的保守性论证与开关见 4.7。
 
-**C8 绿带 margin 短缺**（仅绿带；红带无 margin）
+**C8 绿带 margin 短缺（逐方案、逐绿段配置；仅绿带，红带无 margin）**
+
+margin 写在 `directions[d].green_mask[seg].margin.{start,end}` 上；绿窗两端的
+margin 分别取该窗口首段的 `margin.start` 与末段的 `margin.end`（同色内部边界不参与）。
+设 `A_{p,k}=1` 表示方案 p 有第 k 个窗口，`x_p` 为方案选择变量：
 
 ```
-σ^{m,s}_{b,q,j} ≥ δ^min_b − (u_{b,q} + T_j − φ_{n_j} − ŝ_{n_j,d_b,k} − n_{b,q,j}·C) − M·(1 − a_{b,q,j,k})
-σ^{m,e}_{b,q,j} ≥ δ^min_b − (φ_{n_j} + ê_{n_j,d_b,k} + n_{b,q,j}·C − u_{b,q} − T_j − β_{b,q}) − M·(1 − a_{b,q,j,k})
-                                          ∀b, q, j, k
+硬下限（hard_min_s > 0）：
+  u_{b,q} + T_j − φ_{n_j} − ŝ_{n_j,d,k} − n_{b,q,j}·C + M(1−a_{b,q,j,k})
+      ≥ Σ_p A_{p,k}·hard_{p,start}·x_p
+  φ_{n_j} + ê_{n_j,d,k} + n_{b,q,j}·C − u_{b,q} − T_j − β_{b,q} + M(1−a_{b,q,j,k})
+      ≥ Σ_p A_{p,k}·hard_{p,end}·x_p
+
+软短缺（delta_min_s > 0, coef > 0）：
+  σ^{m,s}_{b,q,j,p} ≥ δ^min_{p,start}
+      − (u_{b,q} + T_j − φ_{n_j} − ŝ_{n_j,d,k} − n_{b,q,j}·C)
+      − M(1−a_{b,q,j,k}) − M(1−x_p)
+  σ^{m,e}_{b,q,j,p} ≥ δ^min_{p,end}
+      − (φ_{n_j} + ê_{n_j,d,k} + n_{b,q,j}·C − u_{b,q} − T_j − β_{b,q})
+      − M(1−a_{b,q,j,k}) − M(1−x_p)
+                                              ∀b, q, j, k, p
 ```
 
-短缺在目标中被最小化（composite 的减项），未指派的槽位约束自动松弛，σ 取 0。
+硬下限的 RHS 是 `Σ_p hard_p·x_p`（线性，不需要新变量）；软损失的 `coef_p`
+随方案变化，必须每个方案各建一个 σ。短缺在目标中被最小化（composite 的减项），
+未指派的槽位/未选中的方案由 big-M 放松，σ 取 0。
 
 **C9 红带构造（因式分解版）**
 
@@ -536,7 +561,7 @@ u_{b,q} + β_{b,q} ≤ u_{b,q2} + M·(2 − e_{b,q} − e_{b,q2})    ∀ q < q2
 
 ```
 composite = Σ_b weight_b · Σ_q β_{b,q}
-          − Σ_{b(green),q,j} κ^m_b · (σ^{m,s}_{b,q,j} + σ^{m,e}_{b,q,j})
+          − Σ_{b(green),q,j,p} coef_p · (σ^{m,s}_{b,q,j,p} + σ^{m,e}_{b,q,j,p})
           − Σ_{c ∈ soft, owner=composite} coef_c · σ_c
 
 L         = Σ_{c ∈ soft, owner=intersection_loss} coef_c · σ_c
@@ -657,12 +682,12 @@ Step 2  定偏置（逐路口解耦）：
           - 对每条经过 i 的带需求，理想到达时刻 = (u + T_i) mod C；
           - 候选 φ_i 只取有限个事件点：各窗口槽的起点/终点对齐到达时刻 ± δ_min
             （每窗口 2 条边 × 每需求 1 个到达时刻，候选数 = O(窗口数 × 需求数)）；
-          - 枚举全部候选，取「各需求 margin 达标情况 − 短缺罚」总分最大者。
+          - 枚举全部候选，取「各绿段 margin 达标情况 − 短缺罚」总分最大者。
 Step 3  构造带：φ 固定后，对每条绿带需求，链上各窗口平移求交，
         构造性地算出每条带槽的真实宽度 β̂（对固定偏置这是精确计算，非估计）；
         红带需求逐对计算 (g, r, k) 重叠实例，取最宽的 ≤ Q_b 个。
 Step 4  块坐标 refinement（默认 3 轮）：
-        固定 φ → 每路口重选方案（局部贡献 = 带 margin 收益 − 路口损失最大者）；
+        固定 φ → 每路口重选方案（局部贡献 = 绿段 margin 收益 − 路口损失最大者）；
         固定方案 → 重算 φ（同 Step 2）；
         收敛或轮数用尽后输出。
 ```
@@ -809,7 +834,7 @@ tests/
 1. **单位后缀强制**：秒 `_s`、周期比例 `_r`、米 `_m`、米每秒 `_mps`。字段、变量、方法名一律遵守，禁止无量纲暗示的名字（如 `start`、`width`）出现在公共接口；
 2. **schema 对象不可变**：全部 pydantic `frozen=True`；`GridPointContext` 为 frozen dataclass；求解期对象（`ArterialModel`、`SolveResult`）可变性按本章定义；
 3. **变量命名规范**（用于调试、日志、诊断）：
-   `plan_on[I1,P1]`、`offset[I2]`、`win_avail[I2,up,1]`（窗口端点本身是表达式，不是变量）、`bnd_delta[I2_P1,up,0]` / `bnd_xdelta[I2_P1,up,0]`、`gw_start[GW_up,1]` / `gw_width[GW_up,1]` / `gw_on[GW_up,1]`、`gw_win[GW_up,1,I2,2]`、`gw_cycle[GW_up,1,I2]`、`gw_margin_lo[GW_up,1,I2,1]` / `gw_margin_hi[GW_up,1,I2,1]`、`rw_start[RW_12,1]` / `rw_width[RW_12,1]` / `rw_on[RW_12,1]`、`rw_up_win[RW_12,1,g1]` / `rw_down_win[RW_12,1,r2,k0]`、`soft_slack[c7.pos]`（命名统一由 `greenwave/model/naming.py` 生成）；
+   `plan_on[I1,P1]`、`offset[I2]`、`win_avail[I2,up,1]`（窗口端点本身是表达式，不是变量）、`bnd_delta[I2_P1,up,0]` / `bnd_xdelta[I2_P1,up,0]`、`gw_start[GW_up,1]` / `gw_width[GW_up,1]` / `gw_on[GW_up,1]`、`gw_win[GW_up,1,I2,2]`、`gw_cycle[GW_up,1,I2]`、`gw_margin_lo[GW_up,1,I2,1,I2_P1]` / `gw_margin_hi[GW_up,1,I2,1,I2_P1]`、`rw_start[RW_12,1]` / `rw_width[RW_12,1]` / `rw_on[RW_12,1]`、`rw_up_win[RW_12,1,g1]` / `rw_down_win[RW_12,1,r2,k0]`、`soft_slack[c7.pos]`（命名统一由 `greenwave/model/naming.py` 生成）；
 4. **错误体系**：`GWValidationError`（输入校验，携带 V 编号）、`GWInfeasibleGridPoint`（格点不可行，携带诊断记录，由 GridRunner 捕获而非上抛）、`GWModelError`（建模内部错误）、`GWSolveError`（求解器层错误）；
 5. **日志**：`logging.getLogger("greenwave.<module>")`；格点级日志必须带 `cycle_s / kappa` context 字段；
 6. **pydantic 校验器只查静态合法性**（V1–V10）；**格点相关可行性一律在 preprocess 层判定**，不混入 schema。
@@ -905,16 +930,24 @@ class BandDemandSpec(BaseModel, frozen=True):
     nodes: tuple[str, ...]          # 按行驶方向排序；red 恰 2 个，green ≥ 2（校验 V4/V5）
     max_bands: int | None = None    # None → 自动（4.8 规则 1）
     weight: float = 1.0
-    margin: MarginSpec | None = None  # None → 用 ObjectiveConfig.margin_default；red 忽略
+    # 注意：margin 不在这里；它逐方案、逐绿段写在 DirectionPlan.green_mask 里
 
 class ParetoConfig(BaseModel, frozen=True):
     num_points: int = 4
     relax_max: float = 0.3
     topk_grids: int = 1
 
+class GreenSegmentSpec(BaseModel, frozen=True):
+    green: bool
+    margin_start: MarginSpec | None = None   # 仅绿段且左边界颜色变化时生效
+    margin_end: MarginSpec | None = None     # 仅绿段且右边界颜色变化时生效
+
+class DirectionPlan(BaseModel, frozen=True):
+    boundaries: tuple[BoundarySpec, ...]
+    green_mask: tuple[GreenSegmentSpec, ...]  # 长度 = 边界数 + 1
+
 class ObjectiveConfig(BaseModel, frozen=True):
     band_demands: tuple[BandDemandSpec, ...]
-    margin_default: MarginSpec = MarginSpec()
     pareto: ParetoConfig = ParetoConfig()
 
 class GridConfig(BaseModel, frozen=True):
@@ -1383,7 +1416,7 @@ def run(problem_json: dict) -> dict:
 | u, β, e | 连续/二进制 | 带起点、宽度、存在性 |
 | a, ag, ar | 二进制 | 绿带窗口槽指派、红带上游绿窗指派、红带下游红窗实例指派 |
 | n | 整数 | 回绕周期数 |
-| σ^m, σ_c | 连续 ≥ 0 | margin 短缺、软约束违反 |
+| σ^m, σ_c | 连续 ≥ 0 | 逐绿段（逐方案）margin 短缺、软约束违反 |
 | Β_b | 表达式 | 需求 b 的聚合带宽 Σ_q β_{b,q} |
 | B* | 标量 | 阶段 1 最优 composite |
 
@@ -1405,9 +1438,13 @@ def run(problem_json: dict) -> dict:
       "min_phase_s": 0.001,
       "directions": {
         "up": {"boundaries": [{"pos_r": 0.45, "adjust": [-0.05, 0.05]}],
-               "green_mask": [true, false]},
+               "green_mask": [
+                 {"green": true,
+                  "margin": {"start": {"delta_min_s": 2.0, "coef": 1.0},
+                             "end": {"delta_min_s": 2.0, "coef": 1.0}}},
+                 {"green": false}]},
         "down": {"boundaries": [{"pos_r": 0.5}, {"pos_r": 0.95}],
-                 "green_mask": [false, true, false]}
+                 "green_mask": [{"green": false}, {"green": true}, {"green": false}]}
       },
       "hard_constraints": [
         {"id": "mg_up", "terms": [
@@ -1424,9 +1461,8 @@ def run(problem_json: dict) -> dict:
   "objective": {
     "band_demands": [
       {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
-       "max_bands": null, "weight": 1.0, "margin": {"delta_min_s": 2.0, "coef": 1.0}}
+       "max_bands": null, "weight": 1.0}
     ],
-    "margin_default": {"delta_min_s": 2.0, "coef": 1.0},
     "pareto": {"num_points": 4, "relax_max": 0.3, "topk_grids": 1}
   },
   "grid": {"cycles_s": [80, 90, 100], "speed_ratios": [1.0]},

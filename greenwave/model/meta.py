@@ -55,12 +55,11 @@ class SoftPenaltyRef:
 
 
 # 一条绿波需求的 margin 短缺变量集合。
+# 现在 margin 逐方案、逐绿窗、逐侧配置，coef 也可能不同，所以按 (变量, 系数) 存。
 @dataclass
 class MarginSlackRef:
     demand_id: str
-    coef: float
-    s_vars: list[VarHandle] = field(default_factory=list)
-    e_vars: list[VarHandle] = field(default_factory=list)
+    slacks: list[tuple[VarHandle, float]] = field(default_factory=list)
 
 
 # 一条带需求的边界亲和松弛变量集合（绿波用本路口绿窗，红波用上游绿窗）。

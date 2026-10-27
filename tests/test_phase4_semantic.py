@@ -15,8 +15,7 @@ def _problem(plans):
         "plans": plans,
         "objective": {"band_demands": [
             {"id": "GW_up", "type": "green", "direction": "up",
-             "nodes": ["I1", "I2"], "weight": 1.0,
-             "margin": {"delta_min_s": 0.0, "coef": 1.0}}]},
+             "nodes": ["I1", "I2"], "weight": 1.0}]},
         "grid": {"cycles_s": [100.0], "speed_ratios": [1.0]},
         "solver": {"backend": "scipy", "time_limit_s": 10, "mip_rel_gap": 0.0,
                    "num_workers": 1, "heuristic": {"enabled": False, "refine_rounds": 0}},

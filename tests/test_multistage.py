@@ -66,9 +66,7 @@ def _two_window_problem(*, adjustable: bool = False, multistage: bool = False) -
             "band_demands": [{
                 "id": "GW_up", "type": "green", "direction": "up",
                 "nodes": nodes, "max_bands": 2, "weight": 1.0,
-                "margin": {"delta_min_s": 0.0, "coef": 1.0},
-            }],
-            "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
+                }],
             "allow_window_sharing": True,
             "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1},
         },
@@ -112,7 +110,6 @@ def _independent_red_problem() -> dict:
                 {"id": "R45", "type": "red", "direction": "up",
                  "nodes": ["I4", "I5"], "max_bands": 1, "weight": 1.0},
             ],
-            "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
             "allow_window_sharing": False,
             "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1},
         },
@@ -157,9 +154,7 @@ def _witness_required_problem() -> dict:
         "plans": plans,
         "objective": {
             "band_demands": [{"id": "GW_up", "type": "green", "direction": "up",
-                              "nodes": nodes, "max_bands": 1, "weight": 1.0,
-                              "margin": {"delta_min_s": 0.0, "coef": 1.0}}],
-            "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
+                              "nodes": nodes, "max_bands": 1, "weight": 1.0}],
             "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1},
         },
         "grid": {"cycles_s": [100.0], "speed_ratios": [1.0]},
@@ -402,7 +397,6 @@ def _chain_problem(*, n_nodes: int = 5, spanning: bool = False,
         "plans": plans,
         "objective": {
             "band_demands": demands,
-            "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
             "allow_window_sharing": False,
             "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1},
         },
@@ -586,11 +580,9 @@ def _multi_plan_chain_problem(n_nodes: int = 4, n_plans: int = 2,
     for k in range(n_nodes - 1):
         a, b = nodes[k], nodes[k + 1]
         demands.append({"id": f"GW_up_{a}_{b}", "type": "green", "direction": "up",
-                        "nodes": [a, b], "max_bands": 1, "weight": 1.0,
-                        "margin": {"delta_min_s": 0.0, "coef": 1.0}})
+                        "nodes": [a, b], "max_bands": 1, "weight": 1.0})
         demands.append({"id": f"GW_down_{b}_{a}", "type": "green", "direction": "down",
-                        "nodes": [b, a], "max_bands": 1, "weight": 1.0,
-                        "margin": {"delta_min_s": 0.0, "coef": 1.0}})
+                        "nodes": [b, a], "max_bands": 1, "weight": 1.0})
     return {
         "corridor": {"corridor_id": "multiplan",
                      "intersections": nodes,
@@ -598,7 +590,6 @@ def _multi_plan_chain_problem(n_nodes: int = 4, n_plans: int = 2,
                                   for i in range(n_nodes - 1)]},
         "plans": plans,
         "objective": {"band_demands": demands,
-                      "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
                       "allow_window_sharing": True,
                       "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1}},
         "global_constraints": [],
@@ -697,8 +688,7 @@ def _two_node_red_problem():
                               segments=(SegmentSpec(from_="I4", to="I5", distance_m=300.0,
                                                     speed_up_mps=10.0, speed_down_mps=10.0),)),
         plans=plans,
-        objective=ObjectiveConfig(band_demands=(red,), margin_default=MarginSpec(0.0, 1.0),
-                                  allow_window_sharing=True,
+        objective=ObjectiveConfig(band_demands=(red,), allow_window_sharing=True,
                                   pareto=ParetoConfig(0, 0.0, 1)),
         grid=GridConfig(cycles_s=(100.0,), speed_ratios=(1.0,)),
         solver=SolverConfig(time_limit_s=30.0, mip_rel_gap=0.0, num_workers=1))
@@ -747,8 +737,7 @@ class TestRedUpstreamWrap(unittest.TestCase):
         for k in range(len(nodes) - 1):
             a, b = nodes[k], nodes[k + 1]
             demands.append({"id": f"GW_up_{a}_{b}", "type": "green", "direction": "up",
-                            "nodes": [a, b], "max_bands": 1, "weight": 1.0,
-                            "margin": {"delta_min_s": 0.0, "coef": 1.0}})
+                            "nodes": [a, b], "max_bands": 1, "weight": 1.0})
             demands.append({"id": f"RW_down_{b}_{a}", "type": "red", "direction": "down",
                             "nodes": [b, a], "max_bands": 1, "weight": 1.0})
         raw["objective"]["band_demands"] = demands

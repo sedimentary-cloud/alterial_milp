@@ -21,7 +21,7 @@ boundaries   : "fixed"      → 删掉所有 adjust 区间，δ≡0；
 ------------------------------------
 * C=140s、κ=1.0（标准案例自带）；
 * backend=scipy(HiGHS)、mip_rel_gap=0、heuristic 关闭、单线程；
-* 所有需求 margin 关掉（delta_min_s=0）；绿波边界亲和默认关闭，本矩阵不启用；
+* 所有绿段 margin 关掉（`strip_mask_margins`）；绿波边界亲和默认关闭，本矩阵不启用；
 * 红波边界亲和保留（标准案例自带 `red_boundary_default`）；
 * global_constraints / constraint_templates 清空：它们引用了本矩阵里不存在的
   需求 id（如 GW_up_full），保留会直接校验失败；
@@ -251,8 +251,7 @@ def _demand(did: str, kind: str, direction: str, nodes: Sequence[str], *,
     return {
         "id": did, "type": kind, "direction": direction, "nodes": list(nodes),
         "max_bands": int(max_bands), "weight": float(weight),
-        "margin": {"delta_min_s": 0.0, "coef": 1.0},
-    }
+        }
 
 
 def demand_needs_two_slots(demand: Mapping[str, Any], nodes: Sequence[str]) -> bool:
@@ -318,7 +317,6 @@ def set_objective(raw: dict[str, Any], objective: str, *,
     }] if spec.balanced else [])
     # 双周期时需要共享绿窗才能用上第 2 个带槽；单周期时关闭，保持单方案口径。
     obj["allow_window_sharing"] = bool(double_cycle)
-    obj["margin_default"] = {"delta_min_s": 0.0, "coef": 1.0, "hard_min_s": 0.0}
     obj["pareto"] = {"num_points": 0, "relax_max": 0.0, "topk_grids": 1}
 
 
@@ -385,6 +383,16 @@ class CaseBuild:
     plan_span: float
     plan_counts: Mapping[str, int]
     notes: tuple[str, ...] = ()
+
+
+def strip_mask_margins(raw: dict[str, Any]) -> None:
+    """基准矩阵不启用 margin：把每个绿段还原成纯颜色（去掉 margin 配置）。"""
+    for p in raw.get("plans", ()):
+        for d in ("up", "down"):
+            segs = p.get("directions", {}).get(d, {}).get("green_mask", ())
+            for seg in segs:
+                if isinstance(seg, dict):
+                    seg.pop("margin", None)
 
 
 def constant_row_violations(model) -> list[str]:
@@ -456,6 +464,7 @@ def build_case(spec: CaseSpec, *, time_limit_s: float = DEFAULT_TIME_LIMIT,
     configure_solver(raw, time_limit_s=time_limit_s)
     clear_global_scopes(raw)
     set_objective(raw, spec.objective, double_cycle=spec.double_cycle)
+    strip_mask_margins(raw)
     if grid is not None:
         apply_grid(raw, cycles_s=grid[0], speed_ratios=grid[1])
 

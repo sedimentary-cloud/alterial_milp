@@ -214,7 +214,7 @@ class SolutionDecoder:
             for b in meta.problem.objective.band_demands:
                 if b.id == band.demand:
                     reward += b.weight * band.width_s
-        margin_pen, green_edge_pen = self._actual_green_penalties(values, bands)
+        margin_pen, green_edge_pen = self._actual_green_penalties(values, bands, selection)
 
         # 红波边界亲和损失：直接从 slack 变量值读取，目标里已最小化它们。
         red_boundary_pen = 0.0
@@ -253,7 +253,7 @@ class SolutionDecoder:
                               float(reward), float(margin_pen), float(green_edge_pen))
 
     # ------------------------------------------------------------------
-    def _actual_green_penalties(self, values: np.ndarray, bands) -> tuple[float, float]:
+    def _actual_green_penalties(self, values: np.ndarray, bands, selection) -> tuple[float, float]:
         """按解码后的几何位置重算绿波两项损失：margin 短缺 与 边界亲和。
 
         为什么不用求解器里的松弛变量？
@@ -269,19 +269,17 @@ class SolutionDecoder:
             b = meta.problem.demand(band.demand)
             if b.type != "green":
                 continue
-            margin = meta.problem.margin_for(b)
             gb = meta.problem.green_boundary_for(b)
-            use_margin = margin.delta_min_s > 0 and margin.coef > 0
             use_edge = gb.enabled and ((gb.start is not None and gb.start.coef > 0)
                                        or (gb.end is not None and gb.end.coef > 0))
-            if not use_margin and not use_edge:
-                continue
             gm = meta.green[b.id]
             table = gm.table
             for j, node in enumerate(b.nodes):
                 k = band.windows.get(node)
                 if k is None:
                     continue
+                # margin 逐方案、逐绿窗配置：用选中方案的第 k 个窗口。
+                ms, me = meta.problem.plan(selection[node]).window_margins(b.direction, k - 1)
                 ew = meta.effective[(node, b.direction)]
                 phi = float(values[meta.phi[node].index])
                 s = phi + ew.s[k].evaluate(values)
@@ -295,9 +293,10 @@ class SolutionDecoder:
                     if band_lo >= ss - 1e-7 and band_hi <= ee + 1e-7:
                         gap_lo = band_lo - ss
                         gap_hi = ee - band_hi
-                        if use_margin:
-                            margin_total += margin.coef * max(0.0, margin.delta_min_s - gap_lo)
-                            margin_total += margin.coef * max(0.0, margin.delta_min_s - gap_hi)
+                        if ms is not None and ms.delta_min_s > 0 and ms.coef > 0:
+                            margin_total += ms.coef * max(0.0, ms.delta_min_s - gap_lo)
+                        if me is not None and me.delta_min_s > 0 and me.coef > 0:
+                            margin_total += me.coef * max(0.0, me.delta_min_s - gap_hi)
                         if use_edge:
                             if gb.start is not None and gb.start.coef > 0:
                                 edge_total += gb.start.coef * max(0.0, gap_lo - gb.start.free_s)

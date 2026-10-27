@@ -61,8 +61,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         },
         "down": {
@@ -72,8 +88,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         }
       },
@@ -97,8 +129,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         },
         "down": {
@@ -112,8 +160,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         }
       },
@@ -247,8 +311,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         },
         "down": {
@@ -262,8 +342,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         }
       },
@@ -483,10 +579,30 @@
             }
           ],
           "green_mask": [
-            true,
-            false,
-            false,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            },
+            {
+              "green": false
+            },
+            {
+              "green": false
+            }
           ]
         },
         "down": {
@@ -514,10 +630,30 @@
             }
           ],
           "green_mask": [
-            false,
-            true,
-            false,
-            false
+            {
+              "green": false
+            },
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            },
+            {
+              "green": false
+            }
           ]
         }
       },
@@ -725,8 +861,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         },
         "down": {
@@ -740,8 +892,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         }
       },
@@ -843,8 +1011,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         },
         "down": {
@@ -854,8 +1038,24 @@
             }
           ],
           "green_mask": [
-            true,
-            false
+            {
+              "green": true,
+              "margin": {
+                "start": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                },
+                "end": {
+                  "delta_min_s": 5.0,
+                  "coef": 1.0,
+                  "hard_min_s": 3.0
+                }
+              }
+            },
+            {
+              "green": false
+            }
           ]
         }
       },
@@ -878,12 +1078,7 @@
           "I6"
         ],
         "max_bands": 2,
-        "weight": 5.0,
-        "margin": {
-          "delta_min_s": 5.0,
-          "coef": 1.0,
-          "hard_min_s": 3.0
-        }
+        "weight": 5.0
       },
       {
         "id": "RW_down_6_5",
@@ -941,11 +1136,6 @@
         "weight": 1.0
       }
     ],
-    "margin_default": {
-      "delta_min_s": 5.0,
-      "coef": 1.0,
-      "hard_min_s": 3.0
-    },
     "pareto": {
       "num_points": 8,
       "relax_max": 0.3,

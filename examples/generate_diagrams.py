@@ -38,7 +38,7 @@ def _dir(boundaries, green_mask, adjust=None) -> dict:
     """Build a v2 DirectionPlan dict directly.
 
     boundaries: positions in (0,1); for double-cycle plans use (0,0.5).
-    green_mask: len(boundaries)+1 booleans.
+    green_mask: len(boundaries)+1 booleans (converted to segment objects).
     adjust: optional {boundary_index: [lo, hi]}.
     """
     boundaries = list(boundaries)
@@ -49,7 +49,8 @@ def _dir(boundaries, green_mask, adjust=None) -> dict:
         if adjust and i in adjust:
             item["adjust"] = [float(adjust[i][0]), float(adjust[i][1])]
         out.append(item)
-    return {"boundaries": out, "green_mask": [bool(x) for x in green_mask]}
+    return {"boundaries": out,
+            "green_mask": [{"green": bool(x)} for x in green_mask]}
 
 
 def _plan(iid: str, up_dir: dict, down_dir: dict,
@@ -59,13 +60,12 @@ def _plan(iid: str, up_dir: dict, down_dir: dict,
             "hard_constraints": list(hard), "soft_constraints": list(soft)}
 
 
-def _problem(corridor, plans, demands, cycle=90.0, margin=0.0) -> dict:
+def _problem(corridor, plans, demands, cycle=90.0) -> dict:
     return {
         "corridor": corridor,
         "plans": plans,
         "objective": {
             "band_demands": demands,
-            "margin_default": {"delta_min_s": margin, "coef": 1.0},
             "pareto": {"num_points": 1, "relax_max": 0.0, "topk_grids": 1},
         },
         "grid": {"cycles_s": [cycle], "speed_ratios": [1.0]},
@@ -111,7 +111,7 @@ def main() -> None:
     plans3 = [_plan(i, up_green_45, down_green_50_95) for i in ("I1", "I2", "I3")]
     render("01_perfect_green_wave", _problem(corridor3, plans3, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
-         "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+         "weight": 1.0},
     ]))
 
     # 02: bidirectional green waves (T3)
@@ -119,9 +119,9 @@ def main() -> None:
     plans_bi = [_plan(i, both_green_45, both_green_45) for i in ("I1", "I2", "I3")]
     render("02_bidirectional_green", _problem(corridor3, plans_bi, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
-         "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+         "weight": 1.0},
         {"id": "GW_down", "type": "green", "direction": "down", "nodes": ["I3", "I2", "I1"],
-         "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+         "weight": 1.0},
     ]))
 
     # 03: multi-window / multi-band (T4)
@@ -130,7 +130,7 @@ def main() -> None:
                 for i in ("I1", "I2", "I3")]
     render("03_multi_window_multi_band", _problem(corridor3, plans_mw, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
-         "max_bands": 2, "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+         "max_bands": 2, "weight": 1.0},
     ]))
 
     # 04: red wave across one adjacent pair (T5)
@@ -160,7 +160,7 @@ def main() -> None:
     ]
     render("05_double_cycle", _problem(corridor_dc, plans_dc, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2"],
-         "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+         "weight": 1.0},
     ]))
 
     # 06: directional segment lengths (up 500 m, down 650 m)
@@ -172,9 +172,9 @@ def main() -> None:
     }
     render("06_directional_segment_lengths", _problem(corridor_dir, plans_bi, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
-         "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+         "weight": 1.0},
         {"id": "GW_down", "type": "green", "direction": "down", "nodes": ["I3", "I2", "I1"],
-         "weight": 1.0, "margin": {"delta_min_s": 0.0}},
+         "weight": 1.0},
     ]))
 
     # 07: up green wave + down red wave
@@ -187,7 +187,7 @@ def main() -> None:
     ]
     render("07_up_green_down_red", _problem(corridor3, plans_ugdr, [
         {"id": "GW_up", "type": "green", "direction": "up", "nodes": ["I1", "I2", "I3"],
-         "weight": 2.0, "margin": {"delta_min_s": 0.0}},
+         "weight": 2.0},
         {"id": "RW_down_32", "type": "red", "direction": "down",
          "nodes": ["I3", "I2"], "max_bands": 1, "weight": 1.0},
         {"id": "RW_down_21", "type": "red", "direction": "down",
@@ -215,6 +215,14 @@ def _standard_demand(did: str, kind: str, direction: str, nodes,
         "weight": weight,
     }
     return obj
+
+
+def _strip_plan_margins(problem: dict) -> None:
+    """对照场景默认不启用 margin（与基准矩阵口径一致）。"""
+    for p in problem.get("plans", ()):
+        for d in ("up", "down"):
+            for seg in p["directions"][d]["green_mask"]:
+                seg.pop("margin", None)
 
 
 def _run_standard_objective_scenarios() -> None:
@@ -298,18 +306,18 @@ def _run_standard_objective_scenarios() -> None:
         problem = copy.deepcopy(base)
         problem["objective"]["band_demands"] = demands
         problem["objective"]["balanced_groups"] = balanced_groups
-        problem["objective"]["margin_default"] = {"delta_min_s": 0.0, "coef": 0.0}
         problem["objective"]["pareto"] = {"num_points": 0, "relax_max": 0.0, "topk_grids": 0}
+        # 默认关闭 margin；Case 2 保留 standard_problem.json 自带的每段 margin。
+        _strip_plan_margins(problem)
         # 这些是 objective 对照场景，默认去掉只针对原上行带宽的 global constraints。
         problem["global_constraints"] = []
-        # Case 2 使用 objective 级 margin：硬 3s，软 5s。
+        # Case 2 保留 base 里每个绿段自带的 margin（硬 3s，软 5s）。
         # 同时额外要求：全局上行绿波带宽 >= 15s。
         if name == "standard_case_02_single_green_single_red_sum":
-            problem["objective"]["margin_default"] = {
-                "delta_min_s": 5.0,
-                "coef": 1.0,
-                "hard_min_s": 3.0,
-            }
+            problem = copy.deepcopy(base)
+            problem["objective"]["band_demands"] = demands
+            problem["objective"]["balanced_groups"] = balanced_groups
+            problem["objective"]["pareto"] = {"num_points": 0, "relax_max": 0.0, "topk_grids": 0}
             problem["global_constraints"] = [{
                 "id": "up_green_bandwidth_min_15",
                 "terms": [{

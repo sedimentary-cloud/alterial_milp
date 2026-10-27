@@ -129,14 +129,20 @@ def gw_cycle(demand: str, slot: int, node: str) -> str:
     return _fmt(GW_CYCLE, demand, slot, node)
 
 
-def gw_margin_lo(demand: str, slot: int, node: str, win_slot: int) -> str:
+def gw_margin_lo(demand: str, slot: int, node: str, win_slot: int,
+                 plan: str | None = None) -> str:
     """绿带左侧 margin 短缺（带宽起点离绿窗起点太近的部分）。"""
-    return _fmt(GW_MARGIN_LO, demand, slot, node, win_slot)
+    if plan is None:
+        return _fmt(GW_MARGIN_LO, demand, slot, node, win_slot)
+    return _fmt(GW_MARGIN_LO, demand, slot, node, win_slot, plan)
 
 
-def gw_margin_hi(demand: str, slot: int, node: str, win_slot: int) -> str:
+def gw_margin_hi(demand: str, slot: int, node: str, win_slot: int,
+                 plan: str | None = None) -> str:
     """绿带右侧 margin 短缺（带宽终点离绿窗终点太近的部分）。"""
-    return _fmt(GW_MARGIN_HI, demand, slot, node, win_slot)
+    if plan is None:
+        return _fmt(GW_MARGIN_HI, demand, slot, node, win_slot)
+    return _fmt(GW_MARGIN_HI, demand, slot, node, win_slot, plan)
 
 
 def gw_edge_lo(demand: str, slot: int, node: str, win_slot: int) -> str:
@@ -218,12 +224,17 @@ def edge_name(demand: str, slot: int, node: str, win_slot: int, side: str) -> st
     raise ValueError(f"unknown edge side {side!r}")
 
 
-def margin_name(demand: str, slot: int, node: str, win_slot: int, side: str) -> str:
-    """按 `side ∈ {"lo","hi"}` 取 margin 短缺变量名（兼容旧代码里的 "s"/"e"）。"""
+def margin_name(demand: str, slot: int, node: str, win_slot: int, side: str,
+                plan: str | None = None) -> str:
+    """按 `side ∈ {"lo","hi"}` 取 margin 短缺变量名（兼容旧代码里的 "s"/"e"）。
+
+    margin 逐方案配置后，同一 (需求, 带槽, 节点, 窗口, 侧) 可能对应多个方案的
+    slack；`plan` 非空时把它放进变量名以免重名。
+    """
     if side in ("lo", "s"):
-        return gw_margin_lo(demand, slot, node, win_slot)
+        return gw_margin_lo(demand, slot, node, win_slot, plan)
     if side in ("hi", "e"):
-        return gw_margin_hi(demand, slot, node, win_slot)
+        return gw_margin_hi(demand, slot, node, win_slot, plan)
     raise ValueError(f"unknown margin side {side!r}")
 
 

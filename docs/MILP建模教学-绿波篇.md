@@ -97,7 +97,7 @@
 | `h_{i,d,k}` | `win_avail[...]` | 连续 [0,1]，由等式行 `h = Σ_p A·x_p` 定义（天然 0/1） | 绿窗槽 k 是否被选中方案提供 |
 | `ag_{b,q,g}` | `rw_up_win[...]` | 0/1 | （红波）带槽 q 使用上游第 g 个绿窗槽 |
 | `ar_{b,q,r,k}` | `rw_down_win[...]` | 0/1 | （红波）带槽 q 使用下游第 r 个红窗、第 k 个周期偏移 |
-| `σ^{m,s}_{b,q,j,k}` / `σ^{m,e}_{b,q,j,k}` | `gw_margin_lo[...]` / `gw_margin_hi[...]` | 连续 ≥ 0 | 绿带在节点 j **用第 k 个窗口槽时**的左 / 右 margin 短缺 |
+| `σ^{m,s}_{b,q,j,k,p}` / `σ^{m,e}_{b,q,j,k,p}` | `gw_margin_lo[...]` / `gw_margin_hi[...]`（多方案时名字带 `p`） | 连续 ≥ 0 | 绿带在节点 j **用第 k 个窗口槽、且选中方案 p 时**的左 / 右 margin 短缺（coef 可逐方案不同） |
 | `σ_c` | `soft_slack[...]` | 连续 ≥ 0 | 第 c 条软约束的违反量 |
 
 ### 0.4 派生量、常量与参数
@@ -112,8 +112,8 @@
 | `β_up` / `β_down` | — | 上行 / 下行那条带各自的宽度（是 `β_{b,q}` 在双向例子里的简写） |
 | `W` | — | 窗口宽度，`W = e − s` |
 | `w_min` | `min_band_width_s` | stage-1 允许的最小带宽（默认 1.0s） |
-| `δ_min` | `margin.delta_min_s` | margin 期望值：带宽两侧希望留出的秒数 |
-| `hard_min` | `margin.hard_min_s` | margin 硬下限（0 表示不启用） |
+| `δ_min` | `green_mask[seg].margin.start/end.delta_min_s` | 该绿段的 margin 期望值：带宽端离这个绿窗边界希望留出的秒数（逐方案、逐绿段配置，§5.10） |
+| `hard_min` | `green_mask[seg].margin.start/end.hard_min_s` | 该绿段的 margin 硬下限（0 表示不启用） |
 | `free_s` / `hard_max_s` | `EdgeSpec` | 边界亲和的免费额度 / 硬上限（`green_boundary`、`red_boundary`；§5.10.1、§11.6） |
 | `σ^e` | `gw_edge_lo/hi[...]`、`rw_edge_start/end[...]` | 边界亲和的超出量（slack），每侧一组，乘 `coef` 进 composite |
 | `M` | `BigMTable` | big-M；代码里按用途分 `containment` / `plan_activation` / `soft` 三个常量（同值）。详见 §5.14 |
@@ -141,7 +141,7 @@
 | `C6` | `C6` | 带存在性（`β ≤ C·e`） |
 | `C7` | `C7` | 多带排序、圆环不重叠、窗口独占 |
 | （C4 配套） | `WIN` | 有效窗口可用性定义（`h = Σ_p A·x_p`） |
-| `C8` | `C8` / `C8_HARD` | margin 短缺（软）/ margin 硬下限 |
+| `C8` | `C8` / `C8_HARD` | 逐绿段 margin 短缺（软）/ 硬下限（方案条件化） |
 | （C8 配套） | `C8_EDGE` / `C8_EDGE_HARD` | 绿波边界亲和（贴合损失）的软罚 / 硬上限 |
 | `C9` | `C9` / `C9_RED_EDGE` / `C9_RED_EDGE_HARD` | 红带构造（`ag`/`ar`、红带存在性、红带相容边） |
 | `C10` | `USER_HARD` / `USER_SOFT` | 用户全局约束 |
@@ -185,14 +185,14 @@
 | 字段 | 含义 |
 |---|---|
 | `boundaries` | 一个方向的相位边界位置列表（比例域，双周期在 (0, 0.5)） |
-| `green_mask` | 逐段的布尔掩码（`true` = 这段是绿），长度 = 边界数 + 1 |
+| `green_mask` | **对象列表**（长度 = 边界数 + 1）：每项 `{"green": bool, "margin": {"start": {...}, "end": {...}}}`；margin 只在该段是绿、且边界两侧颜色不同时生效 |
 | `adjust` | 某个边界允许的微调区间（比例域）；不写 = 该边界固定 |
 | `double_cycle` | 该方案是否双周期（相位图案在 (0, 0.5) 声明、复制两遍） |
 | `min_phase_s` | 相邻相位边界之间至少隔多少秒 |
 | `max_bands` | 这条需求最多开几条带槽（还要受 `qmax` 裁剪，见 §4.5） |
 | `allow_window_sharing` | 是否允许同一条需求的多条带共用同一个绿窗（§7.4） |
 | `weight` | 目标里这条需求带宽的权重（单位：秒 → 目标仍是秒） |
-| `delta_min_s` / `coef` / `hard_min_s` | margin 的期望值 / 罚系数 / 硬下限（§5.10，仅绿波） |
+| `delta_min_s` / `coef` / `hard_min_s` | 绿段 margin 的期望值 / 罚系数 / 硬下限；写在 `green_mask` 每一段里，不配置 = 没有约束或损失（§5.10，仅绿波） |
 | `green_boundary`（`free_s` / `coef` / `hard_max_s`） | 绿波边界亲和：**默认关闭**，只有显式配置需求级 `green_boundary` 或全局 `green_boundary_default` 才生效；开启后超出 `free_s` 的部分按 `coef` 罚，可选硬上限（§5.10.1） |
 | `red_boundary`（`free_s` / `coef` / `hard_max_s`） | 红波边界亲和：前 `free_s` 秒免费、超出按 `coef` 罚、可选硬上限（§11.6） |
 
@@ -427,7 +427,7 @@ z ≤ δ − lo·(1−x)    z ≥ δ − hi·(1−x)
 （x=0 → z=0；x=1 → z=δ）；`x` 连续时它给出的是凸包，是"最紧的线性放松"。
 **常数端点也要乘 x**：如果方案在周期首尾有个**不含 δ 的常数端点**，
 它同样要写成 `常数·x_p`，否则多方案时 Σ_p 会把常数重复计成"方案个数 × 常数"
-（真实 bug：2 个方案时窗口端点被算成 2×，见 `greenwave/model/windows.py:67` 的注释）。
+（真实 bug：2 个方案时窗口端点被算成 2×，见 `greenwave/model/windows.py:61` 的注释）。
 
 **⚠ `adjust` 是"界"而不是"δ 是个区间"**：δ 是**一个连续标量决策变量**，
 `adjust: [lo, hi]` 只是它的上下界；而且这只是**盒子界**，别的约束可以把它压得更紧。
@@ -510,7 +510,7 @@ z ≤ δ − lo·(1−x)    z ≥ δ − hi·(1−x)
 
 | 变量 | 含义 |
 |---|---|
-| `gw_margin_lo` / `gw_margin_hi[b,q,node,slot]` | 绿带左右两侧**离窗口边界太近**的"短缺量"（margin 罚） |
+| `gw_margin_lo` / `gw_margin_hi[b,q,node,slot,plan]` | 绿带左右两侧**离窗口边界太近**的"短缺量"（margin 罚；逐方案、逐绿段配置） |
 | `soft_slack[约束名.pos/.neg]`（σ） | 一条**软约束**的违反量 |
 
 ---
@@ -532,12 +532,12 @@ z ≤ δ − lo·(1−x)    z ≥ δ − hi·(1−x)
 * 于是周期的边界序列（含首尾）是 `[0, 0.25, 0.5, 0.75, 1]`，
   四段依次是：绿、红、红、红 → 绿窗 `[0, 0.25C]`。
 
-代码：`expanded_edge_sources`（`schema/models.py:503`）把首尾常数端点与声明边界
-统一编号成 edge 0..m+1；`expanded_mask`（`schema/models.py:507`）给出掩码。
+代码：`expanded_edge_sources`（`schema/models.py:514`）把首尾常数端点与声明边界
+统一编号成 edge 0..m+1；`expanded_mask`（`schema/models.py:524`）给出掩码。
 
 ### 4.2 极大绿段 = 派生窗口（不是任意子区间）
 
-`_windows_from_ratios`（`schema/models.py:515`）把**连续为绿**的段合并成
+`_windows_from_ratios`（`schema/models.py:532`）把**连续为绿**的段合并成
 **极大绿段**，每一段就是候选窗口槽 k = 1, 2, …：
 
 ```
@@ -548,7 +548,7 @@ mask = [T, F, T, T, F]   →  窗口槽 1 = 第1段, 窗口槽 2 = 第3~4段合�
 只要带宽放得下，车走在极大段里的哪一段都行，所以把极大段切成两半
 只会制造对称的冗余变量。这条规则同时给出一个硬性校验：
 **掩码的首尾不能同时为绿**，否则绿段跨越 0/C 首尾相接、
-"极大段"会被切成两半（`schema/models.py:516` 直接报错并要求旋转方案）。
+"极大段"会被切成两半（`schema/models.py:534` 直接报错并要求旋转方案）。
 
 ### 4.3 双周期：掩码复制两遍
 
@@ -865,29 +865,58 @@ u_{q2} + β_{q2} ≤ u_q + C                      （q2 绕回 0 点后仍不压
 > 剩下 1 个差 0.0002（且两侧都是 time_limit）；另有 1 例打开后从 optimal
 > 变成 time_limit——因为约束与变量都变多了。
 
-### 5.10 C8 绿带 margin 与 C8_EDGE 贴合损失：太贴边不行，太不贴边也不行
+### 5.10 C8 逐绿段 margin 与 C8_EDGE 贴合损失：太贴边不行，太不贴边也不行
 
-现实里带宽贴着绿灯边界不好（排队、清空时间），所以引入**margin**：
-带宽起点距离窗口起点、终点距离窗口终点，各自希望至少有 `δ_min` 秒。
+现实里带宽贴着绿灯边界不好（排队、清空时间），所以引入 **margin**：
+带宽端离它所使用的绿窗边界，希望至少留出 `δ_min` 秒。
 
-**硬下限**（`hard_min_s > 0` 时，`builder.py:1214`）：直接写成 C5 的加强版，
-把 `u + T_j ≥ φ + s + nC` 换成 `u + T_j ≥ φ + s + nC + hard_min`。
+**margin 现在逐方案、逐绿段配置**：`directions[direction].green_mask` 的每一项
+不再是布尔值，而是一个对象：
 
-**软短缺**（`delta_min_s > 0, coef > 0`，`builder.py:1244`）：
-
-```
-σ^s ≥ δ_min − (u + T_j − φ − ŝ − nC) − M(1−a)      （左侧不够的部分）
-σ^e ≥ δ_min − (φ + ê + nC − u − T_j − β) − M(1−a) （右侧不够的部分）
-σ ≥ 0
+```json
+{"green": true,
+ "margin": {"start": {"delta_min_s": 5.0, "coef": 1.0, "hard_min_s": 3.0},
+            "end":   {"delta_min_s": 5.0, "coef": 1.0, "hard_min_s": 3.0}}}
 ```
 
-然后 composite 减去 `coef · Σσ`。教学要点：
+规则：
+
+* 只有**绿段**、且该边界**两侧颜色不同**时 margin 才生效；
+  同色边界（绿-绿 / 红-红）和红段上的 margin 会被忽略（schema 校验 `V10` 给 warning）；
+* **不配置 = 没有硬约束、也没有损失**；不存在 demand 级或全局默认 margin；
+* 一个绿窗由连续若干 green 段合并而成：窗口起点的 margin 取首段的 `margin.start`，
+  终点的 margin 取末段的 `margin.end`；中间的绿-绿同色边界不参与。
+
+**硬下限**（`hard_min_s > 0`，`builder.py:1250` 起）：直接写成 C5 的加强版
+`gap_start ≥ hard_p`、`gap_end ≥ hard_p`。多方案路口用方案选择变量把 RHS
+线性化（`A_{p,k}=1` 表示方案 p 有第 k 个窗口）：
+
+```
+u − φ − s − nC − M·a − Σ_p hard_p·x_p ≥ −T_j − M        （起点侧）
+φ + e + nC − u − β − M·a − Σ_p hard_p·x_p ≥ T_j − M      （终点侧）
+```
+
+**软短缺**（`delta_min_s > 0, coef > 0`，`builder.py:1272` 起）：
+每个方案、每侧、每个窗口槽各建一个 slack（因为 `coef` 可以逐方案不同）：
+
+```
+σ_p ≥ δ_min_p − (u + T_j − φ − ŝ − nC) − M(1−a) − M(1−x_p)
+σ_p ≥ δ_min_p − (φ + ê + nC − u − T_j − β) − M(1−a) − M(1−x_p)
+```
+
+然后 composite 减去 `coef_p · Σσ_p`。教学要点：
 
 * 这是"**软约束的最小化写法**"：`σ ≥ 短缺` 而不是 `σ = 短缺`，
   因为目标在最小化 σ，最优时会自动取等号；
-* σ 是对**每一个 (q, j, k)** 建的，没被选中的窗口靠 `M(1−a)` 放松、σ 取 0；
+* σ 是对**每一个 (q, j, k, side, plan)** 建的：没选中窗口（`a=0`）或没选中方案
+  （`x_p=0`）时分别被 big-M 放松、σ 取 0；
+* **为什么软损失必须按方案分开**：margin 是方案属性，而 MILP 的窗口槽 k 是跨方案
+  混合的（有效窗口 `= Σ_p x_p·endpoint_p`）。硬下限的 RHS 可以写成线性表达式
+  `Σ_p hard_p·x_p`；但软损失的 `coef_p` 要乘在 σ 上，两个随方案变化的量相乘会
+  变成双线性，所以只能每个方案各建一个 σ；
 * **报告里的 margin 损失不是直接读 σ**：σ 只是"模型认为的下界"，
-  解码时用几何法重新算真实短缺（`report/solution.py:256`
+  解码时用**选中方案 + `band.windows[node]`** 取该窗口的 start/end spec，
+  再按几何位置重算真实短缺（`report/solution.py:256`
   `_actual_green_penalties`）——这是一个值得记住的工程习惯：
   **目标函数里的松弛变量值可以大于真实违反量，报告要重算**。
 
@@ -921,8 +950,9 @@ composite 减去 `coef · Σσ^e`。**这一项默认关闭**：不显式配置�
   也可以只开一侧）；两侧都开且**系数相同**时，因为
   `gap_start + gap_end = W − β`，这一项会退化成"带宽加权重"（软最小宽度），
   没有定位作用；
-* 与 margin 一起构成**目标区间** `δ_min ≤ gap ≤ free_s`；若 `free_s < δ_min`
-  两者会互相拉扯（校验 `V12` 警告），实际有效目标会被拉到 `free_s`；
+* 与逐段 margin 一起构成**目标区间** `δ_min ≤ gap ≤ free_s`（`δ_min` 来自该窗口
+  所属绿段的配置）；`V12` 现在只检查 `free_s` 是否大到永远不生效——margin 已移到
+  plan 的绿段上，不再有 demand 级 `free_s < δ_min` 的检查；
 * 参考窗口就是**本节点自己的窗口**，所以只有当带被别的路口卡住、
   本节点存在富余（`W_j − β` 秒）时罚值才不为零；若偏移完全自由，
   它可以被压到 0 且**不损失带宽**——此时它的作用是给出"带从绿灯起点出发"
@@ -933,7 +963,7 @@ composite 减去 `coef · Σσ^e`。**这一项默认关闭**：不显式配置�
 ### 5.11 C10 用户全局约束
 
 用户可以写"上行总带宽 ≥ 15s（硬）"、"上行总带宽尽量 ≥ 20s（软）"这类
-跨需求的约束（`builder.py:1776`，代码里的 group 是 `USER_HARD` / `USER_SOFT`）。
+跨需求的约束（`builder.py:1791`，代码里的 group 是 `USER_HARD` / `USER_SOFT`）。
 
 **可用原子只有三种**：`offset`（φ）、`bandwidth`（`Β_b = Σ_q β`）、`const`。
 `boundary` / `window_duration` / `red_duration` 是**方案作用域**的原子，
@@ -1014,18 +1044,18 @@ C 越大，窗口端点、带起点 u、带宽 β 的界全部按比例变大，
 | `containment` | C5 带的窗口包含（`u + T − φ − ŝ − nC ≥ −M(1−a)`） | `builder.py:1146` | `M` |
 | | NRANGE 回绕整数 n 的紧区间（含不可行剪枝） | `builder.py:1005` | `M` |
 | | C7 多带排序 / 圆环分离 | `builder.py:1175` | `M` |
-| | C8_HARD margin 硬下限 | `builder.py:1215` | `M_hard` |
-| | C9 红带上游包含（`u + β − φ_up − mC − ŝ_up ≤ τ + M(1−ag)`） | `builder.py:1445` 取值、`1498`/`1504` 使用 | `M` |
-| | C8_EDGE_HARD 绿波贴合硬上限 | `builder.py:1340` 起 | `M_hard`（= `containment`） |
-| | C9 红带相容**硬**边 | `builder.py:1545` | `M_hard` |
+| | C8_HARD 逐绿段 margin 硬下限 | `builder.py:1217` | `M_hard` |
+| | C9 红带上游包含（`u + β − φ_up − mC − ŝ_up ≤ τ + M(1−ag)`） | `builder.py:1460` 取值、`1516`/`1522` 使用 | `M` |
+| | C8_EDGE_HARD 绿波贴合硬上限 | `builder.py:1352` 起 | `M_hard`（= `containment`） |
+| | C9 红带相容**硬**边 | `builder.py:1560` | `M_hard` |
 | | C12 模板约束（RHS 是绝对秒时再补 `abs(rhs)`） | `builder.py:852` | `M + abs(rhs) + 1` |
-| `soft` | C8 margin 短缺 σ | `builder.py:1262` | `M` |
-| | C8_EDGE 绿波贴合软罚（起点 / 终点） | `builder.py:1316` 起 | `M_edge`（= `soft`） |
-| | C9 红带相容**软**边 | `builder.py:1544` | `M_edge` |
-| | C10 用户软约束的违反量 `σ_c` 上界 | `builder.py:1790` | `M + abs(rhs) + max_abs_atom_bound(3C) + 1` |
+| `soft` | C8 margin 短缺 σ（逐方案 slack） | `builder.py:1272` | `M` |
+| | C8_EDGE 绿波贴合软罚（起点 / 终点） | `builder.py:1283` 起 | `M_edge`（= `soft`） |
+| | C9 红带相容**软**边 | `builder.py:1559` | `M_edge` |
+| | C10 用户软约束的违反量 `σ_c` 上界 | `builder.py:1804` | `M + abs(rhs) + max_abs_atom_bound(3C) + 1` |
 | `plan_activation` | —— **当前没有调用点**：C2/C3 的方案激活没有用这个字段，而是走逐约束估算 `_constraint_activation_m`（见 §5.14.4） | — | — |
 
-另外 `builder.py:1250`、`1310`、`1555`、`1581` 用 `2M` 当作 margin 短缺 / 绿波贴合 / 红边软量 σ 的**技术上界**
+另外 `builder.py:1278`、`1322`、`1570`、`1596` 用 `2M` 当作 margin 短缺 / 绿波贴合 / 红边软量 σ 的**技术上界**
 （保证变量有界），正常解不会顶到那里。
 
 #### 5.14.3 6C 是怎么来的
@@ -1128,7 +1158,7 @@ LP 上界**完全相同**（1285.97）。所以"别用 1e6"的**主要**理由�
 
 ```
 composite =  Σ_b weight_b · Σ_q β_{b,q}                    ← 带宽奖励（要最大化）
-           − Σ_{绿带} coef · (σ^s + σ^e)                   ← margin 短缺罚
+           − Σ_{绿带 margin} coef_p · σ_p                  ← 逐绿段 margin 短缺罚
            − Σ_{绿带边界亲和} coef · slack                 ← 绿波起点贴合罚
            − Σ_{软约束, owner=composite} coef · σ          ← 用户软约束罚
            + Σ_{均衡组} group.weight · z_g                 ← 均衡组奖励
@@ -1142,13 +1172,13 @@ L (只是记录，不进 composite) = Σ_{软约束, owner=intersection_loss} co
 三条设计原则：
 
 1. **单位统一**：所有项都是"秒"，系数无量纲。这样"1 秒带宽 vs 1 秒 margin 短缺"
-   的取舍才有可解释的价格。
+   的取舍才有可解释的价格（margin 逐绿段配置，每个方案/窗口的 σ 有自己的 coef）。
 2. **账本分离**：需要"同时报告带宽和各类损失"的多目标场景，不把所有东西
    揉进一个加权和，而是把损失归到 `L`、用第二阶段的 ε-constraint 扫 Pareto 前沿
    （`pareto/`）：先 `max composite` 得到 `B*`，再对若干 `ε` 求解
    `min L s.t. composite ≥ B* − ε`。这样给出的是一条**前沿**，而不是一个
    拍脑袋的权重。
-3. **均衡组**（`builder.py:1665`）：`z_g ≤ Β_b / target_b`（组内需求带宽的
+3. **均衡组**（`builder.py:1680`）：`z_g ≤ Β_b / target_b`（组内需求带宽的
    归一化最小值），把 `weight·z_g` 加进目标 → "两个方向都要好，
    而不是一个方向特别宽、另一个为零"。这是"公平性"的线性化标准做法。
 
@@ -1304,11 +1334,12 @@ python examples/tutorial_small_cases.py
 
 ### 8.4 案例 4：margin 的价格
 
-在案例 3 的第一行上给两个方向都加 `margin: {delta_min_s: 5, coef: 1}`：
+在案例 3 的第一行上，给两个方向**每个绿段的两端**都配
+`margin: {delta_min_s: 5, coef: 1}`：
 
 * `composite = 40`；解里**存活的那条带（下行）**左右余量恰好都是 5s（margin 罚为 0），
   上行那条 β = 0（被解码过滤），仍是 §8.3 第一行那个「一个方向吃光绿窗」的互斥现象；
-* 40 = 50 − 2×5：**窗口两侧的 margin 直接吃掉可用宽度**；
+* 40 = 50 − 2×5：**每个窗口两侧的 margin 直接吃掉可用宽度**；
 * 与案例 3 的 50 相比，等于"用 10s 带宽换 margin 达标"；
 * 若把带宽权重调大（例如 `weight=5`），模型会反过来宁可吃 margin 罚
   也要保住带宽——**软约束的价格就是这么起作用的**（见 §7.2）。
@@ -1383,7 +1414,7 @@ marginal σ    → 丢弃，改用几何重算的 margin 损失
 ### 11.2 差异 1：红窗不是配出来的，是绿窗的**补集**
 
 红波没有任何"红相位边界/红掩码"配置——它的窗口由**选中方案的绿窗补集**现算
-（`RedWindowBuilder`，`windows.py:150`）。设下游路口某方向有 K 个派生绿窗
+（`RedWindowBuilder`，`windows.py:140`）。设下游路口某方向有 K 个派生绿窗
 （`[ŝ_1,ê_1], …, [ŝ_K,ê_K]`，按周期顺序），则红窗有 2K−1 段：
 
 ```
@@ -1478,12 +1509,12 @@ wrap 段 rid = K … 2K−1:  [ ê_r , ŝ_1 + C ]        可用性 = h_r − h_{
 `ar_keys`（`_red_compatible_keys`），把不可能配对的变量直接不建——
 所以红波的 `ag`/`ar` 通常远少于理论个数。**`m` 的区间也按上游窗口槽分别推导**
 （`_red_upstream_wrap_bounds`），并且用**紧的**专用 big-M `Mm`（`m` 的跨度只有几），
-而不是全局 containment M（`builder.py:1513`）。
+而不是全局 containment M（`builder.py:1528`）。
 
 ### 11.6 差异 5：红波没有 margin，但两种带都有**边界亲和**（贴合损失）
 
-* **红波没有 margin**：margin 变量只在 `_build_green_bands` 里创建
-  （`margin` 是绿波专属，设计文档 C8 明确写"仅绿带；红带无 margin"）；
+* **红波没有 margin**：margin 变量只在 `_build_green_bands` 里创建，
+  且逐方案、逐绿段配置（`margin` 是绿波专属；红带无 margin）；
 * 但两种带都需要"**贴合损失**"，只是参考边界不同：
   * 绿波 `C8_EDGE`（`green_boundary`，默认关闭，显式开启后可只开起点侧）：带端贴**本节点**绿窗；
   * 红波 `C9_RED_EDGE`（`red_boundary`）：带端贴**上游**绿窗。
@@ -1503,9 +1534,9 @@ gap_end   = (φ_up + ê_g + τ) − (u + β)    ← 红带终点比上游绿窗�
 不配置就不启用，需要时按 §5.10.1 显式打开。
 
 编码差异：**红波边界罚在报告里是直接读 slack 变量值的**
-（`report/solution.py:219-234`），而绿波的 margin 与贴合罚都挂在 `a` 上，
-必须解码后**几何重算**（`report/solution.py:256` `_actual_green_penalties`，
-§5.10）——否则未选中窗口的 slack 会变成"幻影罚"。
+（`report/solution.py:219-234`），而绿波的 margin slack 挂在 `a` 与 `x_p` 上、
+贴合罚挂在 `a` 上，必须解码后**几何重算**（`report/solution.py:256`
+`_actual_green_penalties`，§5.10）——否则未选中窗口/方案的 slack 会变成"幻影罚"。
 
 ### 11.7 差异 6：带槽数上限的来源不同（以及没有窗口独占行）
 
@@ -1554,7 +1585,7 @@ gap_end   = (φ_up + ê_g + τ) − (u + β)    ← 红带终点比上游绿窗�
 | `e_{b,q}` | `gw_on[{b},{q}]` | 0/1 | 带槽存在性 |
 | `a_{b,q,j,k}` | `gw_win[{b},{q},{node},{slot}]` | 0/1 | 该带在该节点用的窗口槽 |
 | `n_{b,q,j}` | `gw_cycle[{b},{q},{node}]` | 整数 | 周期副本下标 |
-| `σ` | `gw_margin_lo/hi[...]`, `soft_slack[...]` | 连续 ≥0 | margin / 软约束短缺 |
+| `σ` | `gw_margin_lo/hi[...]`, `soft_slack[...]` | 连续 ≥0 | margin（逐绿段、逐方案）/ 软约束短缺 |
 | `σ^e` | `gw_edge_lo/hi[...]`, `rw_edge_start/end[...]` | 连续 ≥0 | 边界亲和超出 `free_s` 的部分 |
 | `free_s` / `hard_max_s` | `EdgeSpec` | 常数 | 边界亲和的免费额度 / 硬上限 |
 | `green_edge_loss_s` | `SolutionRecord.green_edge_loss_s` | 秒 | 报告字段：绿波贴合损失，解码时按几何位置重算 |
@@ -1567,20 +1598,20 @@ gap_end   = (φ_up + ê_g + τ) − (u + β)    ← 红带终点比上游绿窗�
 | C1 方案选择 / φ 锚点 | `builder.py:186` / `builder.py:205` |
 | δ、z 与 McCormick | `builder.py:219` / `builder.py:251` |
 | big-M 常量表 | `greenwave/model/meta.py:30` |
-| 派生窗口（极大绿段、双周期复制） | `greenwave/schema/models.py:503-600` |
+| 派生窗口（极大绿段、双周期复制） | `greenwave/schema/models.py:510-620` |
 | 有效窗口 `ŝ/ê/h` | `greenwave/model/windows.py:102` |
-| 红窗补集（gap + wrap） | `greenwave/model/windows.py:150` |
+| 红窗补集（gap + wrap） | `greenwave/model/windows.py:140` |
 | C2/C3 条件激活与软约束 | `builder.py:612` / `builder.py:634`，调用点 `builder.py:753` / `builder.py:769` |
 | PLAN_WINDOW 最小相位 | `builder.py:925` |
 | 绿带主循环 C4–C8 | `builder.py:1050` |
-| C8_EDGE 绿波贴合损失 | `builder.py:1286` |
-| C9_RED_EDGE 红波贴合损失 | `builder.py:1536` |
+| C8_EDGE 绿波贴合损失 | `builder.py:1298` |
+| C9_RED_EDGE 红波贴合损失 | `builder.py:1551` |
 | n 的紧区间推导 | `builder.py:449` |
 | NRANGE 接线与剪枝 | `builder.py:992` |
 | 对称破缺 | `builder.py:967` |
-| 红带 C9/C13 | `builder.py:1365` |
-| 均衡组 | `builder.py:1665` |
-| 用户全局/模板约束 | `builder.py:1776` / `builder.py:848` |
+| 红带 C9/C13 | `builder.py:1380` |
+| 均衡组 | `builder.py:1680` |
+| 用户全局/模板约束 | `builder.py:1791` / `builder.py:848` |
 | 带槽数裁剪 | `greenwave/preprocess/context.py:76` |
 | 目标装配 `expr_composite` / `expr_loss` | `builder.py:96` / `builder.py:125` |
 | 解码与损失重算（margin + 贴合） | `greenwave/report/solution.py:76` / `:256` |

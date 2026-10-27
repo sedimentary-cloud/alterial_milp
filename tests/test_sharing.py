@@ -33,8 +33,7 @@ def _problem(allow_sharing: bool):
             "band_demands": [{
                 "id": "GW_up", "type": "green", "direction": "up",
                 "nodes": ["I1", "I2"], "max_bands": 2, "weight": 1.0,
-                "margin": {"delta_min_s": 0.0, "coef": 1.0},
-            }],
+                }],
             "allow_window_sharing": allow_sharing,
             "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1},
         },

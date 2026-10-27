@@ -5,7 +5,7 @@
 1. 单方向带 + φ 全自由：带宽 = 链上最窄绿窗（φ 可以自由把窗口挪到带的位置上）；
 2. 窗口选择：I1 有两个绿段（5s / 50s），模型会挑能用的那一段（各路口**独立**挑）；
 3. 双向冲突：两个方向共享每个路口的 φ，工程上真正难的地方；
-4. margin：两侧各留 δ_min 秒 → 可用宽度 = 绿窗宽 − 2δ_min。
+4. margin：**每个绿段**的左右边界各留 δ_min 秒 → 可用宽度 = 绿窗宽 − 2δ_min。
 
 用法：
     python examples/tutorial_small_cases.py
@@ -33,19 +33,41 @@ def segment(a: str, b: str, distance_m: float = 300.0) -> dict:
             "speed_up_mps": SPEED, "speed_down_mps": SPEED}
 
 
-def plan(pid: str, iid: str, boundaries: list[float], mask: list[bool]) -> dict:
+def _segments(mask: list[bool], *, margin_s: float = 0.0, coef: float = 1.0,
+              hard_min_s: float = 0.0) -> list[dict]:
+    """绿掩码 -> 对象列表；margin 只挂在每个绿段（颜色变化边界）的两端。"""
+    segs = [{"green": bool(x)} for x in mask]
+    if margin_s <= 0 and hard_min_s <= 0:
+        return segs
+    spec = {"delta_min_s": margin_s, "coef": coef, "hard_min_s": hard_min_s}
+    i = 0
+    while i < len(mask):
+        if not mask[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(mask) and mask[j + 1]:
+            j += 1
+        segs[i]["margin"] = {"start": dict(spec)}
+        segs[j].setdefault("margin", {})["end"] = dict(spec)
+        i = j + 1
+    return segs
+
+
+def plan(pid: str, iid: str, boundaries: list[float], mask: list[bool], *,
+         margin_s: float = 0.0, coef: float = 1.0, hard_min_s: float = 0.0) -> dict:
     dirs = {d: {"boundaries": [{"pos_r": x} for x in boundaries],
-                "green_mask": list(mask)} for d in ("up", "down")}
+                "green_mask": _segments(mask, margin_s=margin_s, coef=coef,
+                                        hard_min_s=hard_min_s)}
+            for d in ("up", "down")}
     return {"id": pid, "intersection": iid, "double_cycle": False,
             "min_phase_s": 0.001, "directions": dirs,
             "hard_constraints": [], "soft_constraints": []}
 
 
-def demand(did: str, direction: str, nodes: list[str], *, weight: float = 1.0,
-           margin_s: float = 0.0, coef: float = 1.0) -> dict:
+def demand(did: str, direction: str, nodes: list[str], *, weight: float = 1.0) -> dict:
     return {"id": did, "type": "green", "direction": direction, "nodes": list(nodes),
-            "max_bands": 1, "weight": weight,
-            "margin": {"delta_min_s": margin_s, "coef": coef}}
+            "max_bands": 1, "weight": weight}
 
 
 def build(plans: list[dict], demands: list[dict], *, distance_m: float = 300.0
@@ -56,7 +78,6 @@ def build(plans: list[dict], demands: list[dict], *, distance_m: float = 300.0
                                   segment("I2", "I3", distance_m)]},
         "plans": plans,
         "objective": {"band_demands": demands, "balanced_groups": [],
-                      "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
                       "pareto": {"num_points": 0, "relax_max": 0.0, "topk_grids": 1},
                       "allow_window_sharing": False},
         "grid": {"cycles_s": [C], "speed_ratios": [1.0]},
@@ -139,10 +160,11 @@ def case_3_bidirectional() -> None:
 
 
 def case_4_margin() -> None:
-    plans = [plan(f"I{i}_P1", f"I{i}", [0.5], [True, False]) for i in (1, 2, 3)]
-    solve(build(plans, [demand("GW_up", "up", ["I1", "I2", "I3"], margin_s=5.0),
-                        demand("GW_down", "down", ["I3", "I2", "I1"], margin_s=5.0)]),
-          "案例 4：双向 + margin(δmin=5s, coef=1) → 可用宽度 50−2×5 = 40s")
+    plans = [plan(f"I{i}_P1", f"I{i}", [0.5], [True, False], margin_s=5.0)
+             for i in (1, 2, 3)]
+    solve(build(plans, [demand("GW_up", "up", ["I1", "I2", "I3"]),
+                        demand("GW_down", "down", ["I3", "I2", "I1"])]),
+          "案例 4：双向 + 每个绿段 margin(δmin=5s, coef=1) → 可用宽度 50−2×5 = 40s")
 
 
 if __name__ == "__main__":

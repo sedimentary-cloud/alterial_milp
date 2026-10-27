@@ -27,9 +27,7 @@ def _old_problem(heuristic=True):
                   for i in ("I1", "I2", "I3")],
         "objective": {"band_demands": [
             {"id": "GW_up", "type": "green", "direction": "up",
-             "nodes": ["I1", "I2", "I3"], "weight": 1.0,
-             "margin": {"delta_min_s": 0.0, "coef": 1.0}}],
-            "margin_default": {"delta_min_s": 0.0, "coef": 1.0},
+             "nodes": ["I1", "I2", "I3"], "weight": 1.0}],
             "pareto": {"num_points": 1, "relax_max": 0.0, "topk_grids": 1}},
         "grid": {"cycles_s": [90.0], "speed_ratios": [1.0]},
         "solver": {"backend": "scipy", "time_limit_s": 20, "mip_rel_gap": 0.0,

@@ -98,8 +98,8 @@ class ArterialModel:
         for b in self.meta.problem.objective.band_demands:
             expr.add(self.expr_bandwidth(b.id), b.weight)
         for m in self.meta.margins:
-            for h in list(m.s_vars) + list(m.e_vars):
-                expr.add(h, -m.coef)
+            for h, coef in m.slacks:
+                expr.add(h, -coef)
         for ref in self.meta.red_boundary:
             for h in ref.start_vars:
                 expr.add(h, -ref.start_coef)
@@ -1113,6 +1113,8 @@ class ModelBuilder:
                 )
                 self.meta.green_boundary.append(gb_ref)
 
+            margin_ref = MarginSlackRef(b.id)
+
             for q in range(1, qmax + 1):
                 # C4：如果这条带存在 e=1，那么链上每个节点都必须恰好
                 # 选择一个绿灯窗口槽位；如果 e=0，就一个也不选。
@@ -1205,83 +1207,93 @@ class ModelBuilder:
                             self.cons.add(row, "<=", 1.0,
                                           ConstraintMeta("C7", f"window exclusive {b.id}/{node}/{k}",
                                                          {"demand": b.id, "node": node, "window": str(k)}))
-                # C8：margin 短缺。
-                # 带离绿灯窗口左右边界太近时，把不足的部分记成 σ，
-                # 再乘以系数罚到 composite 目标里。
-                margin = self.problem.margin_for(b)
+                # C8 / C8_HARD：逐绿窗 margin。
+                # margin 现在逐方案、逐绿段配置（plan.green_mask 的 GreenSegmentSpec），
+                # 而 MILP 的窗口槽 k 是跨方案混合的（有效窗口 = Σ_p x_p·endpoint_p）：
+                #   * 硬下限：gap >= Σ_p A_{p,k}·x_p·hard_p —— RHS 是线性的，不新增变量；
+                #   * 软损失：coef 可能逐方案不同，所以每个方案各建一个 slack，
+                #     用 a（带选中该窗口）与 x_p（方案被选中）两个 big-M 条件激活。
+                # 同色边界 / 红段上的 margin 在 schema 校验时警告并忽略，这里只读绿窗两侧。
+                M_hard = self.m.containment
+                M_soft = self.m.soft
+                for side in ("s", "e"):
+                    for j, node in enumerate(b.nodes):
+                        plans_node = self.ctx.feasible_plans.get(node, ())
+                        for k in range(1, self.ctx.max_window_slots(node, d) + 1):
+                            side_specs = []
+                            for p in plans_node:
+                                if p.window_count(d) < k:
+                                    continue
+                                ms, me = p.window_margins(d, k - 1)
+                                spec = ms if side == "s" else me
+                                if spec is None:
+                                    continue
+                                side_specs.append((p, spec, self.meta.plan_vars.get(p.id)))
+                            if not side_specs:
+                                continue
+                            av = a[(q, j, k)]
+                            nv = n[(q, j)]
+                            phi = self.meta.phi[node]
+                            if side == "s":
+                                base = LinearExpr.of(u[q], 1.0).add(phi, -1.0)
+                                base.add(self.meta.effective[(node, d)].s[k], -1.0)
+                                base.add(nv, -self.C)
+                                tag = "start"
+                            else:
+                                base = LinearExpr.of(phi, 1.0)
+                                base.add(self.meta.effective[(node, d)].e[k], 1.0)
+                                base.add(nv, self.C).add(u[q], -1.0).add(beta[q], -1.0)
+                                tag = "end"
 
-                # C8_HARD：margin 硬下限。hard_min_s=0 表示不启用。
-                if margin.hard_min_s > 0:
-                    M_hard = self.m.containment
-                    for side in ("s", "e"):
-                        for j, node in enumerate(b.nodes):
-                            for k in range(1, self.ctx.max_window_slots(node, d) + 1):
-                                s_var = self.meta.effective[(node, d)].s[k]
-                                e_var = self.meta.effective[(node, d)].e[k]
-                                phi = self.meta.phi[node]
-                                nv = n[(q, j)]
-                                av = a[(q, j, k)]
-                                if side == "s":
-                                    row = LinearExpr.of(u[q], 1.0).add(phi, -1.0).add(s_var, -1.0)
-                                    row.add(nv, -self.C).add(av, -M_hard)
-                                    self.cons.add(row, ">=",
-                                                  margin.hard_min_s - table.cum_T_s[j] - M_hard,
-                                                  ConstraintMeta("C8_HARD",
-                                                                 f"margin hard start {b.id}/{q}/{node}/{k}",
-                                                                 {"demand": b.id, "slot": str(q), "node": node,
-                                                                  "window": str(k)}))
+                            # ---- C8_HARD：硬下限 ----
+                            hard_specs = [t for t in side_specs if t[1].hard_min_s > 0]
+                            if hard_specs:
+                                row = base.copy().add(av, -M_hard)
+                                x_used = False
+                                for p, spec, x in hard_specs:
+                                    if x is not None:
+                                        row.add(x, -spec.hard_min_s)
+                                        x_used = True
+                                if x_used:
+                                    rhs = -table.cum_T_s[j] - M_hard if side == "s" \
+                                          else table.cum_T_s[j] - M_hard
                                 else:
-                                    row = LinearExpr.of(phi, 1.0).add(e_var, 1.0)
-                                    row.add(nv, self.C).add(u[q], -1.0).add(beta[q], -1.0)
-                                    row.add(av, -M_hard)
-                                    self.cons.add(row, ">=",
-                                                  margin.hard_min_s + table.cum_T_s[j] - M_hard,
-                                                  ConstraintMeta("C8_HARD",
-                                                                 f"margin hard end {b.id}/{q}/{node}/{k}",
-                                                                 {"demand": b.id, "slot": str(q), "node": node,
-                                                                  "window": str(k)}))
+                                    # 固定方案：没有 x，RHS 直接是常数。
+                                    hard = hard_specs[0][1].hard_min_s
+                                    rhs = hard - table.cum_T_s[j] - M_hard if side == "s" \
+                                          else hard + table.cum_T_s[j] - M_hard
+                                self.cons.add(row, ">=", rhs,
+                                              ConstraintMeta("C8_HARD",
+                                                             f"margin hard {tag} {b.id}/{q}/{node}/{k}",
+                                                             {"demand": b.id, "slot": str(q),
+                                                              "node": node, "window": str(k)}))
 
-                if margin.delta_min_s > 0 and margin.coef > 0:
-                    ref = MarginSlackRef(b.id, margin.coef)
-                    for side in ("s", "e"):
-                        for j, node in enumerate(b.nodes):
-                            for k in range(1, self.ctx.max_window_slots(node, d) + 1):
-                                var = self.vars.add(naming.margin_name(b.id, q, node, k, side), 0.0,
-                                                    self.m.containment * 2.0, GVarType.CONTINUOUS,
-                                                    {"kind": "margin_shortfall", "demand": b.id,
-                                                     "slot": q, "node": node, "window": k, "side": side})
-                                if side == "s":
-                                    ref.s_vars.append(var)
-                                else:
-                                    ref.e_vars.append(var)
-                                s = self.meta.effective[(node, d)].s[k]
-                                ew = self.meta.effective[(node, d)].e[k]
-                                phi = self.meta.phi[node]
-                                nv = n[(q, j)]
-                                av = a[(q, j, k)]
-                                M = self.m.soft
-                                if side == "s":
-                                    # 左 margin 短缺：带宽起点离窗口起点太近。
-                                    # σ_left >= δ_min - (u+T-φ-s-nC) - M(1-a)。
-                                    # sigma + u - phi - s - nC - M*a >= delta - T - M
-                                    row = LinearExpr.of(var, 1.0).add(u[q], 1.0).add(phi, -1.0)
-                                    row.add(s, -1.0).add(nv, -self.C).add(av, -M)
-                                    self.cons.add(row, ">=", margin.delta_min_s - table.cum_T_s[j] - M,
-                                                  ConstraintMeta("C8", f"margin start {b.id}/{q}/{node}/{k}",
-                                                                 {"demand": b.id, "slot": str(q), "node": node,
-                                                                  "window": str(k)}))
-                                else:
-                                    # 右 margin 短缺：带宽终点离窗口终点太近。
-                                    # σ_right >= δ_min - (φ+e+nC-u-T-β) - M(1-a)。
-                                    # sigma + phi + e + nC - u - T - beta - M*a >= delta - M
-                                    row = LinearExpr.of(var, 1.0).add(phi, 1.0).add(ew, 1.0)
-                                    row.add(nv, self.C).add(u[q], -1.0).add(beta[q], -1.0)
-                                    row.add(av, -M)
-                                    self.cons.add(row, ">=", margin.delta_min_s + table.cum_T_s[j] - M,
-                                                  ConstraintMeta("C8", f"margin end {b.id}/{q}/{node}/{k}",
-                                                                 {"demand": b.id, "slot": str(q), "node": node,
-                                                                  "window": str(k)}))
-                    self.meta.margins.append(ref)
+                            # ---- C8：软损失 ----
+                            for p, spec, x in side_specs:
+                                if spec.delta_min_s <= 0 or spec.coef <= 0:
+                                    continue
+                                var = self.vars.add(
+                                    naming.margin_name(b.id, q, node, k, side,
+                                                       plan=None if x is None else p.id),
+                                    0.0, self.m.containment * 2.0, GVarType.CONTINUOUS,
+                                    {"kind": "margin_shortfall", "demand": b.id,
+                                     "slot": q, "node": node, "window": k,
+                                     "side": side, "plan": p.id})
+                                margin_ref.slacks.append((var, spec.coef))
+                                row = base.copy().add(var, 1.0).add(av, -M_soft)
+                                if x is not None:
+                                    row.add(x, -M_soft)
+                                rhs = (spec.delta_min_s - table.cum_T_s[j] - M_soft
+                                       if side == "s"
+                                       else spec.delta_min_s + table.cum_T_s[j] - M_soft)
+                                if x is not None:
+                                    rhs -= M_soft
+                                self.cons.add(row, ">=", rhs,
+                                              ConstraintMeta("C8",
+                                                             f"margin {tag} {b.id}/{q}/{node}/{k}/{p.id}",
+                                                             {"demand": b.id, "slot": str(q),
+                                                              "node": node, "window": str(k),
+                                                              "plan": p.id}))
 
                 # C8_EDGE：绿带边界亲和（贴合损失）。
                 # 与 C8 margin 相反：margin 罚“离窗口边界太近”，亲和罚“离窗口边界太远”。
@@ -1358,6 +1370,9 @@ class ModelBuilder:
                                                                      f"green edge end max {b.id}/{q}/{node}/{k}",
                                                                      {"demand": b.id, "slot": str(q),
                                                                       "node": node, "window": str(k)}))
+
+            if margin_ref.slacks:
+                self.meta.margins.append(margin_ref)
 
     # ------------------------------------------------------------------
     # C9 red bands

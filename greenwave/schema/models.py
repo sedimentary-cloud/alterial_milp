@@ -104,11 +104,12 @@ class BoundarySpec:
         return cls(_num(pos, "pos_r"), (_num(adj[0], "adjust.lo"), _num(adj[1], "adjust.hi")))
 
 
-# 一个方向声明：有序相位边界 + 每段是否为绿灯。
+# 一个方向声明：有序相位边界 + 每段的颜色与 margin 配置（GreenSegmentSpec）。
 @dataclass(frozen=True)
 class DirectionPlan:
     boundaries: tuple[BoundarySpec, ...] = ()
-    green_mask: tuple[bool, ...] = (False,)
+    green_mask: tuple[GreenSegmentSpec, ...] = field(
+        default_factory=lambda: (GreenSegmentSpec(False),))
 
     def __post_init__(self) -> None:
         pos = [b.pos_r for b in self.boundaries]
@@ -119,10 +120,20 @@ class DirectionPlan:
                 raise ValueError("boundary positions must be strictly increasing")
         if len(self.green_mask) != len(self.boundaries) + 1:
             raise ValueError("green_mask length must equal boundary count + 1")
+        for seg in self.green_mask:
+            if not isinstance(seg, GreenSegmentSpec):
+                raise ValueError(
+                    "green_mask entries must be GreenSegmentSpec objects "
+                    '({"green": ..., "margin": ...}), not booleans')
 
     @property
     def boundary_count(self) -> int:
         return len(self.boundaries)
+
+    @property
+    def mask_bool(self) -> tuple[bool, ...]:
+        """只取颜色位（窗口派生、画图等只需要 True/False）。"""
+        return tuple(seg.green for seg in self.green_mask)
 
     @classmethod
     def from_obj(cls, obj: Any) -> "DirectionPlan":
@@ -137,7 +148,7 @@ class DirectionPlan:
         raw_mask = obj.get("green_mask", obj.get("mask"))
         if raw_mask is None:
             raise ValueError("direction plan requires green_mask")
-        green_mask = tuple(bool(x) for x in raw_mask)
+        green_mask = tuple(GreenSegmentSpec.from_obj(x) for x in raw_mask)
         return cls(boundaries, green_mask)
 
 
@@ -469,7 +480,7 @@ class PlanSpec:
 
     # -- declared access ------------------------------------------------------
     def direction_plan(self, d: Direction) -> DirectionPlan:
-        return self.directions.get(d, DirectionPlan((), (False,)))
+        return self.directions.get(d, DirectionPlan((), (GreenSegmentSpec(False),)))
 
     def boundary_count(self, d: Direction) -> int:
         return self.direction_plan(d).boundary_count
@@ -504,8 +515,14 @@ class PlanSpec:
         specs = self._expanded_boundary_specs(d)
         return (("const", 0, 0.0),) + tuple((s[1], s[2], s[3]) for s in specs) + (("const", 1, 1.0),)
 
+    def expanded_segments(self, d: Direction) -> tuple[GreenSegmentSpec, ...]:
+        segs = self.direction_plan(d).green_mask
+        if not self.double_cycle:
+            return segs
+        return segs + segs
+
     def expanded_mask(self, d: Direction) -> tuple[bool, ...]:
-        mask = self.direction_plan(d).green_mask
+        mask = self.direction_plan(d).mask_bool
         if not self.double_cycle:
             return mask
         return mask + mask
@@ -561,6 +578,20 @@ class PlanSpec:
 
     def window_edge_span(self, d: Direction, k: int) -> DerivedInterval:
         return self.derived_windows(d)[k]
+
+    def window_margins(self, d: Direction, k: int):
+        """第 k 个绿窗的 (start margin, end margin)。
+
+        start 取形成该窗口的第一段绿的 ``margin_start``；
+        end 取形成该窗口的最后一段绿的 ``margin_end``。
+        同色内部边界的配置不会被返回（窗口边界必是颜色变化边界）。
+        """
+        w = self.window_edge_span(d, k)
+        segs = self.expanded_segments(d)
+        start = segs[w.start_edge].margin_start if 0 <= w.start_edge < len(segs) else None
+        j = w.end_edge - 1
+        end = segs[j].margin_end if 0 <= j < len(segs) else None
+        return start, end
 
     def is_copy_window(self, d: Direction, k: int) -> bool:
         """For double-cycle plans, second-half derived windows are copies."""
@@ -739,14 +770,19 @@ class CorridorSpec:
 # Objective / grid / solver
 # ---------------------------------------------------------------------------
 
-# 绿波带的 margin 配置：希望带宽离绿灯窗口边界至少留多少秒。
+# 一个相位边界上的 margin 配置：带宽端离这个绿灯窗口边界至少留多少秒。
+# 只挂在 green_mask 的绿段上（见 GreenSegmentSpec），不再有 demand/全局默认值。
 @dataclass(frozen=True)
 class MarginSpec:
-    # 软 margin 目标：低于该值产生罚项。
-    delta_min_s: float = 2.0
+    # 软 margin 目标：低于该值产生罚项（0 表示没有软损失）。
+    delta_min_s: float = 0.0
     coef: float = 1.0
     # 硬 margin 下限：低于该值直接不可行；0 表示不启用硬约束。
     hard_min_s: float = 0.0
+
+    def to_obj(self) -> dict[str, float]:
+        return {"delta_min_s": self.delta_min_s, "coef": self.coef,
+                "hard_min_s": self.hard_min_s}
 
     @classmethod
     def from_obj(cls, obj: Any) -> "MarginSpec":
@@ -754,9 +790,53 @@ class MarginSpec:
             return obj
         if obj is None:
             return cls()
-        return cls(_num(obj.get("delta_min_s", 2.0), "delta_min_s"),
+        return cls(_num(obj.get("delta_min_s", 0.0), "delta_min_s"),
                    _num(obj.get("coef", 1.0), "coef"),
                    _num(obj.get("hard_min_s", 0.0), "hard_min_s"))
+
+
+# 一个相位区间（相邻边界之间）的颜色与 margin 配置。
+#   green        : 这段是否绿灯；
+#   margin_start : 本段左边界上的 margin（仅当本段是绿、且左边界两侧颜色不同才生效）；
+#   margin_end   : 本段右边界上的 margin（同上）。
+# 同色边界、或红段上的 margin 配置会被忽略（schema 校验给 warning）。
+@dataclass(frozen=True)
+class GreenSegmentSpec:
+    green: bool = False
+    margin_start: MarginSpec | None = None
+    margin_end: MarginSpec | None = None
+
+    @classmethod
+    def from_obj(cls, obj: Any) -> "GreenSegmentSpec":
+        if isinstance(obj, GreenSegmentSpec):
+            return obj
+        if isinstance(obj, bool):
+            # 简写：只给颜色、不带 margin。正式格式仍是对象。
+            return cls(green=obj)
+        if not isinstance(obj, Mapping):
+            raise ValueError(f"green segment must be an object, got {obj!r}")
+        if "green" not in obj:
+            raise ValueError(f"green segment requires a 'green' boolean: {obj!r}")
+        margin = obj.get("margin")
+        start = None
+        end = None
+        if margin is not None:
+            if not isinstance(margin, Mapping):
+                raise ValueError(f"green segment margin must be an object, got {margin!r}")
+            if margin.get("start") is not None:
+                start = MarginSpec.from_obj(margin["start"])
+            if margin.get("end") is not None:
+                end = MarginSpec.from_obj(margin["end"])
+        return cls(green=bool(obj["green"]), margin_start=start, margin_end=end)
+
+    def to_obj(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"green": self.green}
+        if self.margin_start is not None or self.margin_end is not None:
+            out["margin"] = {
+                "start": None if self.margin_start is None else self.margin_start.to_obj(),
+                "end": None if self.margin_end is None else self.margin_end.to_obj(),
+            }
+        return out
 
 
 # 带边界亲和性配置（绿波、红波共用）：
@@ -840,7 +920,6 @@ class BandDemandSpec:
     nodes: tuple[str, ...]
     max_bands: int | None = None
     weight: float = 1.0
-    margin: MarginSpec | None = None
     red_boundary: RedBoundarySpec | None = None
     green_boundary: BoundaryAffinitySpec | None = None
 
@@ -857,6 +936,10 @@ class BandDemandSpec:
     def from_obj(cls, obj: Any) -> "BandDemandSpec":
         if isinstance(obj, BandDemandSpec):
             return obj
+        if "margin" in obj:
+            raise ValueError(
+                "demand-level margin was removed; configure margin on each green segment: "
+                '{"green": true, "margin": {"start": {...}, "end": {...}}}')
         return cls(
             id=str(obj["id"]),
             type=obj.get("type", "green"),
@@ -864,7 +947,6 @@ class BandDemandSpec:
             nodes=tuple(str(x) for x in obj["nodes"]),
             max_bands=int(obj["max_bands"]) if obj.get("max_bands") is not None else None,
             weight=_num(obj.get("weight", 1.0), "weight"),
-            margin=MarginSpec.from_obj(obj.get("margin")) if obj.get("margin") is not None else None,
             red_boundary=(RedBoundarySpec.from_obj(obj.get("red_boundary"))
                           if obj.get("red_boundary") is not None else None),
             green_boundary=(BoundaryAffinitySpec.from_obj(obj.get("green_boundary"))
@@ -953,7 +1035,6 @@ class ParetoConfig:
 @dataclass(frozen=True)
 class ObjectiveConfig:
     band_demands: tuple[BandDemandSpec, ...]
-    margin_default: MarginSpec = field(default_factory=MarginSpec)
     red_boundary_default: RedBoundarySpec = field(default_factory=RedBoundarySpec)
     # 绿波边界亲和：默认关闭；用户显式配置 green_boundary_default 或需求级
     # green_boundary 才生效（不做隐式默认，避免用户不知道目标里多了一项）。
@@ -967,9 +1048,12 @@ class ObjectiveConfig:
     def from_obj(cls, obj: Any) -> "ObjectiveConfig":
         if isinstance(obj, ObjectiveConfig):
             return obj
+        if "margin_default" in obj:
+            raise ValueError(
+                "objective.margin_default was removed; configure margin per green segment "
+                "inside each plan's directions[direction].green_mask")
         return cls(
             band_demands=tuple(BandDemandSpec.from_obj(d) for d in obj.get("band_demands", ())),
-            margin_default=MarginSpec.from_obj(obj.get("margin_default")),
             red_boundary_default=RedBoundarySpec.from_obj(obj.get("red_boundary_default")),
             green_boundary_default=BoundaryAffinitySpec.from_obj(
                 obj.get("green_boundary_default")),
@@ -1133,9 +1217,6 @@ class ProblemInput:
                 return d
         return None
 
-    def margin_for(self, demand: BandDemandSpec) -> MarginSpec:
-        return demand.margin if demand.margin is not None else self.objective.margin_default
-
     def red_boundary_for(self, demand: BandDemandSpec) -> RedBoundarySpec:
         if demand.red_boundary is not None:
             return demand.red_boundary
@@ -1234,7 +1315,7 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
                          "adjust": None if b.adjust is None else [b.lo_r, b.hi_r]}
                         for b in p.direction_plan(d).boundaries
                     ],
-                    "green_mask": list(p.direction_plan(d).green_mask),
+                    "green_mask": [seg.to_obj() for seg in p.direction_plan(d).green_mask],
                 }
                 for d in ("up", "down")
             },
@@ -1245,19 +1326,9 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
             "band_demands": [{
                 "id": b.id, "type": b.type, "direction": b.direction, "nodes": list(b.nodes),
                 "max_bands": b.max_bands, "weight": b.weight,
-                "margin": None if b.margin is None else {
-                    "delta_min_s": b.margin.delta_min_s,
-                    "coef": b.margin.coef,
-                    "hard_min_s": b.margin.hard_min_s,
-                },
                 "red_boundary": _boundary_obj(b.red_boundary),
                 "green_boundary": _boundary_obj(b.green_boundary),
             } for b in self.objective.band_demands],
-            "margin_default": {
-                "delta_min_s": self.objective.margin_default.delta_min_s,
-                "coef": self.objective.margin_default.coef,
-                "hard_min_s": self.objective.margin_default.hard_min_s,
-            },
             "red_boundary_default": _boundary_obj(self.objective.red_boundary_default),
             "green_boundary_default": _boundary_obj(self.objective.green_boundary_default),
             "pareto": {"num_points": self.objective.pareto.num_points,
@@ -1295,7 +1366,8 @@ __all__ = [
     "Direction", "Side", "Unit", "BoundarySpec", "DirectionPlan", "DerivedInterval",
     "WindowSpec", "AtomRef", "LinearTerm", "SoftPenalty", "ConstraintSpec",
     "ConstraintScope", "ConstraintTemplate", "PlanSpec",
-    "SegmentSpec", "CorridorSpec", "MarginSpec", "EdgeSpec", "BoundaryAffinitySpec",
+    "SegmentSpec", "CorridorSpec", "MarginSpec", "GreenSegmentSpec",
+    "EdgeSpec", "BoundaryAffinitySpec",
     "RedEdgeSpec", "RedBoundarySpec",
     "BandDemandSpec",
     "BalancedGroupSpec", "ParetoConfig", "ObjectiveConfig", "GridConfig", "HeuristicConfig",

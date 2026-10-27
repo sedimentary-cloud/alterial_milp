@@ -410,15 +410,16 @@ class GreedyConstructor:
         if b.type != "green":
             return 0.0
         table = self.ctx.travel[b.id]
-        margin = self.problem.margin_for(b)
-        if margin.delta_min_s <= 0 or margin.coef <= 0:
-            return 0.0
         pen = 0.0
         for j, node in enumerate(b.nodes if hasattr(b, "nodes") else table.nodes):
             slot = band.windows.get(node)
             if slot is None:
                 continue
             plan = selection[node]
+            ms, me = plan.window_margins(b.direction, slot - 1)
+            if ((ms is None or ms.delta_min_s <= 0 or ms.coef <= 0)
+                    and (me is None or me.delta_min_s <= 0 or me.coef <= 0)):
+                continue
             witness = self._witness.get(plan.id, {})
             # 对外 windows 统一是 1-based，内部 helper 需要 0-based。
             slot_inner = slot - 1
@@ -432,8 +433,10 @@ class GreedyConstructor:
                 ss = s + nn * self.C
                 ee = e + nn * self.C
                 if band_lo >= ss - 1e-7 and band_hi <= ee + 1e-7:
-                    pen += margin.coef * max(0.0, margin.delta_min_s - (band_lo - ss))
-                    pen += margin.coef * max(0.0, margin.delta_min_s - (ee - band_hi))
+                    if ms is not None and ms.delta_min_s > 0 and ms.coef > 0:
+                        pen += ms.coef * max(0.0, ms.delta_min_s - (band_lo - ss))
+                    if me is not None and me.delta_min_s > 0 and me.coef > 0:
+                        pen += me.coef * max(0.0, me.delta_min_s - (ee - band_hi))
                     break
         return pen
 
