@@ -65,6 +65,48 @@ class TestBoundaryFeasibility(unittest.TestCase):
         self.assertIn(("up", 0), witness)
         self.assertEqual(len(witness), 1)
 
+    def test_witness_minimizes_total_adjustment(self):
+        d = {
+            "corridor": {"corridor_id": "w", "intersections": ["I1"], "segments": []},
+            "plans": [{
+                "id": "I1_P1", "intersection": "I1", "double_cycle": False,
+                "min_phase_s": 1.0,
+                "directions": {
+                    "up": {"boundaries": [{"pos_r": 0.2, "adjust": [-0.05, 0.05]},
+                                          {"pos_r": 0.4, "adjust": [-0.05, 0.05]}],
+                           "green_mask": [True, False, False]},
+                    "down": {"boundaries": [], "green_mask": [False]},
+                },
+                "hard_constraints": [{
+                    "id": "sum_low",
+                    "terms": [
+                        {"atom": {"kind": "boundary", "intersection": "I1",
+                                  "plan": "I1_P1", "direction": "up", "index": 0},
+                         "coef": 1.0},
+                        {"atom": {"kind": "boundary", "intersection": "I1",
+                                  "plan": "I1_P1", "direction": "up", "index": 1},
+                         "coef": 1.0},
+                    ],
+                    "sense": ">=", "rhs_ratio": 0.64,
+                }],
+            }],
+            "objective": {"band_demands": []},
+            "grid": {"cycles_s": [90.0], "speed_ratios": [1.0]},
+            "solver": {"backend": "scipy", "time_limit_s": 10, "mip_rel_gap": 0.0,
+                       "num_workers": 1,
+                       "heuristic": {"enabled": False, "refine_rounds": 0}},
+        }
+        problem = ProblemInput.from_obj(d)
+        ctx = FeasibilityFilter(problem).filter(90.0, 1.0)
+        w = ctx.witness_for("I1_P1")
+        delta0, delta1 = w[("up", 0)], w[("up", 1)]
+        # 约束只要求 δ0+δ1 ≥ 0.04；最小 Σ|δ| ⇒ 两者非负、和恰为 0.04。
+        self.assertAlmostEqual(delta0 + delta1, 0.04, places=6)
+        self.assertGreaterEqual(delta0, -1e-9)
+        self.assertGreaterEqual(delta1, -1e-9)
+        self.assertLessEqual(delta0, 0.04 + 1e-9)
+        self.assertLessEqual(delta1, 0.04 + 1e-9)
+
     def test_min_phase_violation_drops_plan(self):
         d = {
             "id": "I1_P1", "intersection": "I1", "double_cycle": False,

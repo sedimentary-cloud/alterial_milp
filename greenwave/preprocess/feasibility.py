@@ -253,19 +253,42 @@ class FeasibilityFilter:
             feasible = True
             x = None
         else:
+            # 初始参考解不只要可行，还要“尽量少动边界”：
+            # 目标 min Σ|δ_i|，用辅助变量 z_i 线性化：
+            #   z_i >= δ_i,  z_i >= -δ_i  =>  δ_i - z_i <= 0,  -δ_i - z_i <= 0
+            # 比例域与秒域只差常数 C，argmin 相同。
+            n2 = 2 * n
+            c = np.zeros(n2)
+            c[n:] = 1.0
+            a_ub2 = [row + [0.0] * n for row in a_ub]
+            for i in range(n):
+                lo_i, hi_i = bounds[i]
+                row_pos = [0.0] * n2           # δ_i - z_i <= 0
+                row_pos[i] = 1.0
+                row_pos[n + i] = -1.0
+                a_ub2.append(row_pos)
+                row_neg = [0.0] * n2           # -δ_i - z_i <= 0
+                row_neg[i] = -1.0
+                row_neg[n + i] = -1.0
+                a_ub2.append(row_neg)
+            b_ub2 = list(b_ub) + [0.0] * (2 * n)
+            a_eq2 = [row + [0.0] * n for row in a_eq] if a_eq else None
+            bounds2 = list(bounds) + [(0.0, max(abs(lo_i), abs(hi_i)))
+                                      for lo_i, hi_i in bounds]
             res = linprog(
-                c=np.zeros(n),
-                A_ub=np.asarray(a_ub, dtype=float) if a_ub else None,
-                b_ub=np.asarray(b_ub, dtype=float) if b_ub else None,
-                A_eq=np.asarray(a_eq, dtype=float) if a_eq else None,
+                c=c,
+                A_ub=np.asarray(a_ub2, dtype=float) if a_ub2 else None,
+                b_ub=np.asarray(b_ub2, dtype=float) if b_ub2 else None,
+                A_eq=np.asarray(a_eq2, dtype=float) if a_eq2 else None,
                 b_eq=np.asarray(b_eq, dtype=float) if a_eq else None,
-                bounds=bounds,
+                bounds=bounds2,
                 method="highs",
             )
             feasible = bool(res.status == 0)
             x = res.x if feasible else None
 
         if feasible:
+            # 前 n 个变量才是 δ；z 只是目标里的辅助量。
             witness = tuple((d, j, float(x[index[(d, j)]])) for (d, j) in keys)
             return PlanFeasibility(True, (), witness)
         reasons = list(self._geometry_violations(plan, cycle_s, {}))
@@ -280,12 +303,14 @@ class FeasibilityFilter:
         feasible: dict[str, tuple[PlanSpec, ...]] = {}
         dropped: list[DroppedPlanRecord] = []
         bad: dict[str, tuple[str, ...]] = {}
+        witnesses: dict[str, tuple[tuple[Direction, int, float], ...]] = {}
         for iid in self.problem.corridor.intersections:
             good: list[PlanSpec] = []
             for p in self.problem.plans_of(iid):
                 status = self.check_plan(p, cycle_s)
                 if status.feasible:
                     good.append(p)
+                    witnesses[p.id] = status.witness_r
                 else:
                     dropped.append(DroppedPlanRecord(iid, p.id, float(cycle_s), status.violations))
             if not good:
@@ -294,11 +319,6 @@ class FeasibilityFilter:
                 feasible[iid] = tuple(good)
         if bad:
             raise GWInfeasibleGridPoint(cycle_s, kappa, bad, dropped=tuple(dropped))
-
-        witnesses: dict[str, tuple[tuple[Direction, int, float], ...]] = {}
-        for iid, plans in feasible.items():
-            for p in plans:
-                witnesses[p.id] = self.check_plan(p, cycle_s).witness_r
 
         tau: dict[tuple[str, Direction], float] = {}
         corr = self.problem.corridor

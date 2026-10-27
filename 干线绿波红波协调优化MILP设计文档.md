@@ -611,7 +611,7 @@ for l = 0..K_pareto:
 ### 5.2 判定方法
 
 - **固定窗口方案**：窗口秒值逐条代入硬约束验证，纯算术；
-- **可调端点方案**：以微调量 δ 为变量、硬约束 + 可调边界 + 窗口有序不重叠 + 双周期一致性等式为约束，解一个可行性 LP（变量 ≤ 12，约束数十条，scipy.optimize.linprog / HiGHS）。
+- **可调端点方案**：以微调量 δ 为变量、硬约束 + 可调边界 + 窗口有序不重叠 + 双周期一致性等式为约束，解一个 LP（变量 ≤ 12，约束数十条，scipy.optimize.linprog / HiGHS）；目标为 **min Σ|δ|**（辅助变量 z_i ≥ ±δ_i 线性化），即在所有可行参考解里取“边界调整量绝对值之和最小”的那一个。
 
 ### 5.3 格点级结论
 
@@ -999,7 +999,7 @@ class FeasibilityFilter:
     def _check_fixed(self, plan: PlanSpec, cycle_s: float) -> PlanFeasibility:
         """窗口秒值逐条代入硬约束，纯算术。"""
     def _check_lp(self, plan: PlanSpec, cycle_s: float) -> PlanFeasibility:
-        """以 δ 为变量的可行性 LP（§5.2），含窗口有序、双周期一致性等式；结果入缓存。"""
+        """以 δ 为变量、目标 min Σ|δ| 的参考解 LP（§5.2），含窗口有序、双周期一致性等式；结果入缓存。"""
     def filter(self, cycle_s: float, kappa: float) -> GridPointContext:
         """逐路口检查；某路口全部方案不可行 → raise GWInfeasibleGridPoint（含诊断）。"""
 ```
