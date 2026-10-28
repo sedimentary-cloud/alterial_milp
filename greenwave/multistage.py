@@ -594,6 +594,10 @@ def solve_fixed_boundaries(
 
     use_decompose = (problem.solver.multistage.decompose_stage1
                      if decompose is None else bool(decompose))
+    # band_objective 聚合会进入阶段 1 目标，无法按语义组拆分；此时仍保留
+    # multistage 的整模 MIP + 交替 refinement，只是不做分解。
+    if problem.aggregates_affect_composite():
+        use_decompose = False
     stage_limit = (time_limit_s if time_limit_s is not None
                    else problem.solver.time_limit_s)
     stage_gap = (mip_rel_gap if mip_rel_gap is not None

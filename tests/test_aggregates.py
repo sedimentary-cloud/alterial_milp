@@ -61,6 +61,30 @@ def _problem(plans, aggregates, *, soft=None, demand_nodes=("I1", "I2"), cycle=C
     }
 
 
+def _three_node_problem(aggregates):
+    plans = [_plan("I1_P1", "I1", [0.2], [True, False]),
+             _plan("I2_P1", "I2", [0.5], [True, False]),
+             _plan("I3_P1", "I3", [0.3], [True, False])]
+    raw = {
+        "corridor": {"corridor_id": "agg3", "intersections": ["I1", "I2", "I3"],
+                     "segments": [_seg("I1", "I2"), _seg("I2", "I3")]},
+        "plans": plans,
+        "objective": {"band_demands": [
+            {"id": "GW12", "type": "green", "direction": "up",
+             "nodes": ["I1", "I2"], "weight": 1.0},
+            {"id": "GW23", "type": "green", "direction": "up",
+             "nodes": ["I2", "I3"], "weight": 1.0}],
+            "pareto": {"num_points": 1, "relax_max": 0.0, "topk_grids": 1}},
+        "grid": {"cycles_s": [CYCLE], "speed_ratios": [1.0]},
+        "solver": {"backend": "scipy", "time_limit_s": 30, "mip_rel_gap": 0.0,
+                   "num_workers": 1,
+                   "heuristic": {"enabled": False, "refine_rounds": 0},
+                   "multistage": {"enabled": True, "max_rounds": 0, "restarts": 1}},
+        "aggregates": aggregates,
+    }
+    return raw
+
+
 def _solve(problem):
     from greenwave.model.builder import ModelBuilder
     from greenwave.preprocess.feasibility import FeasibilityFilter
@@ -265,6 +289,32 @@ class TestAggregateMilp(unittest.TestCase):
         out = run(raw)
         # 多阶段不理解聚合，必须回退完整 MILP 才能得到 81。
         self.assertAlmostEqual(out["grid_results"][0]["composite_best"], 81.0, places=3)
+
+    def test_multistage_keeps_decomposition_for_loss_only_aggregate(self):
+        from dataclasses import replace
+        from greenwave.multistage import solve_multistage
+        from greenwave.preprocess.feasibility import FeasibilityFilter
+
+        agg = {
+            "id": "min_phase", "op": "min", "plan": "I1_P1",
+            "expressions": [
+                [{"atom": {"kind": "boundary", "intersection": "I1", "plan": "I1_P1",
+                           "direction": "up", "index": 0}, "coef": 1.0}],
+                [{"atom": {"kind": "const", "const": 1.0, "unit": "ratio"}, "coef": 1.0},
+                 {"atom": {"kind": "boundary", "intersection": "I1", "plan": "I1_P1",
+                           "direction": "up", "index": 0}, "coef": -1.0}],
+            ],
+            "contributions": [{"target": "intersection_loss", "weight": 1.0}],
+        }
+        problem = ProblemInput.from_obj(_three_node_problem([agg]))
+        ctx = FeasibilityFilter(problem).filter(CYCLE, 1.0)
+        cfg = replace(problem.solver.multistage, enabled=True, max_rounds=0, restarts=1)
+        ms = solve_multistage(problem, ctx, cfg)
+        self.assertIsNotNone(ms.solution)
+        self.assertIn("语义分解", ms.stage1_paths)
+        self.assertAlmostEqual(ms.solution.aggregates["min_phase"], 18.0, places=3)
+        self.assertAlmostEqual(ms.solution.aggregate_loss_s, -18.0, places=3)
+        self.assertAlmostEqual(ms.solution.loss_s, -18.0, places=3)
 
     def test_greedy_runs_with_aggregates(self):
         plans = [_plan("I1_P1", "I1", [0.2, 0.6], [True, True, False]),

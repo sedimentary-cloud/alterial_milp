@@ -1254,7 +1254,9 @@ min: t ≤ e_i + M(1−x_p)                  ← 选中时上包络
   `plan.hard_constraints` 的普通线性行，更简单、语义也更明确；
 * balanced group 就是 `min` 聚合 + band objective 奖励，本机制是它的推广，
   暂不替换 balanced group；
-* 存在 aggregates 时，多阶段语义分解会自动回退完整 MILP。
+* 只有 `target=band_objective` 的聚合会进入阶段 1 的 composite，从而让多阶段
+  语义分解回退完整 MILP；只贡献 `intersection_loss` 的聚合在阶段 1 不可见，
+  仍可走多阶段语义分解（子问题丢弃聚合、拼装完整解时补出 `t`）。
 
 ---
 

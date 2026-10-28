@@ -1307,6 +1307,11 @@ class ProblemInput:
     def plans_of(self, intersection: str) -> tuple[PlanSpec, ...]:
         return tuple(p for p in self.plans if p.intersection == intersection)
 
+    def aggregates_affect_composite(self) -> bool:
+        """聚合是否影响阶段 1 的 composite（即存在 band_objective 贡献）。"""
+        return any(c.target == "band_objective"
+                   for a in self.aggregates for c in a.contributions)
+
     def demand(self, demand_id: str) -> BandDemandSpec:
         for d in self.objective.band_demands:
             if d.id == demand_id:

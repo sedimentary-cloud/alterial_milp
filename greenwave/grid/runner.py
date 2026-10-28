@@ -81,9 +81,10 @@ def _stage1_worker(payload):
 def _solve_stage1(problem: ProblemInput, ctx: GridPointContext,
                   solver_cfg: SolverConfig) -> GridPointResult:
     """Stage 1：默认完整 MILP；开启 multistage 后走多阶段快速路径。"""
-    # 具名聚合把跨路口的贡献写进目标/损失，语义分解的“子问题独立可加”
-    # 前提不再成立，直接回退完整 MILP。
-    if solver_cfg.multistage.enabled and not problem.aggregates:
+    # 聚合只在 target=band_objective 时才进入阶段 1 的 composite；这类项破坏了
+    # 语义分解的“子问题独立可加”前提，回退完整 MILP。只贡献 intersection_loss
+    # 的聚合在阶段 1 不可见，可以继续走多阶段（子问题中丢弃，拼装时补值）。
+    if solver_cfg.multistage.enabled and not problem.aggregates_affect_composite():
         return _solve_stage1_multistage(problem, ctx, solver_cfg)
     return _solve_stage1_full_milp(problem, ctx, solver_cfg)
 

@@ -338,7 +338,16 @@ def _finalize_runs(problem: ProblemInput, groups: Sequence[Sequence[str]]
 # ---------------------------------------------------------------------------
 
 def build_subproblem(problem: ProblemInput, group: DemandGroup) -> ProblemInput:
-    """把整条干线问题裁成这个组覆盖的那一段（需求和方案都是原对象的子集）。"""
+    """把整条干线问题裁成这个组覆盖的那一段（需求和方案都是原对象的子集）。
+
+    具名聚合：target=band_objective 的项会进入阶段 1 的目标，无法按组拆分，
+    直接拒绝；target=intersection_loss 的项在阶段 1 不可见，子问题里丢掉，
+    拼装完整解时再由 :func:`_fill_aggregate_values` 补上聚合变量。
+    """
+    if problem.aggregates_affect_composite():
+        raise GWModelError(
+            "stage1 decomposition does not support aggregate contributions "
+            "to band_objective; fall back to full MILP")
     index = {iid: i for i, iid in enumerate(problem.corridor.intersections)}
     nodes = problem.corridor.intersections[group.lo:group.hi + 1]
     node_set = set(nodes)
@@ -375,9 +384,10 @@ def build_subproblem(problem: ProblemInput, group: DemandGroup) -> ProblemInput:
                          enabled=False)
     solver = replace(problem.solver, multistage=multistage)
 
+    # 只保留全局/方案/模板约束；聚合在阶段 1 不可见，子问题不建。
     return replace(problem, corridor=corridor, plans=plans, objective=objective,
                    solver=solver, global_constraints=tuple(globals_kept),
-                   constraint_templates=templates_kept)
+                   constraint_templates=templates_kept, aggregates=())
 
 
 def _template_is_inside(tmpl: ConstraintTemplate, plan_ids: set[str]) -> bool:
@@ -497,6 +507,41 @@ def _verify_rows(model: ArterialModel, values: np.ndarray) -> str | None:
     return None
 
 
+def _selected_plan_id(model: ArterialModel, values: np.ndarray,
+                      intersection: str) -> str | None:
+    """从拼装后的完整变量值里读出某路口选中的方案 id。"""
+    meta = model.meta
+    for pid, x in meta.plan_vars.items():
+        if meta.problem.plan(pid).intersection == intersection and float(values[x.index]) > 0.5:
+            return pid
+    fixed = meta.fixed_plans.get(intersection)
+    if fixed is not None:
+        return fixed
+    feasible = meta.ctx.feasible_plans.get(intersection, ())
+    return feasible[0].id if len(feasible) == 1 else None
+
+
+def _fill_aggregate_values(model: ArterialModel, values: np.ndarray) -> None:
+    """按完整解补全聚合变量 t（子问题里没有建聚合）。
+
+    t 只影响阶段 2/Pareto 的解码与整模逐行校验；阶段 1 的 composite 不含它。
+    """
+    meta = model.meta
+    for am in meta.aggregates.values():
+        if am.var is None:
+            continue
+        selected = am.available
+        if selected and am.spec.plan is not None:
+            plan = meta.problem.plan(am.spec.plan)
+            selected = (_selected_plan_id(model, values, plan.intersection) == plan.id)
+        if selected:
+            vals = [e.evaluate(values) for e in am.expressions]
+            value = max(vals) if am.spec.op == "max" else min(vals)
+        else:
+            value = 0.0
+        values[am.var.index] = float(value)
+
+
 def _assemble(problem: ProblemInput, model: ArterialModel,
               solved: Sequence[_GroupSolution], *,
               label: str,
@@ -556,6 +601,8 @@ def _assemble(problem: ProblemInput, model: ArterialModel,
             values[idx] = 0.0
         covered[:] = True
 
+    # 子问题里没有聚合变量；按整模的选中方案/δ 补出 t，再逐行校验。
+    _fill_aggregate_values(model, values)
     bad = _verify_rows(model, values)
     if bad is not None:
         return None
