@@ -57,6 +57,7 @@ BAL_PRESENT: Final = "bal_present"    # 均衡组：成员需求是否至少有�
 BAL_DEFICIT: Final = "bal_deficit"    # 均衡组：min_existing 短缺
 
 SOFT_SLACK: Final = "soft_slack"      # 软约束违反量 σ（含方案软约束与用户软约束）
+SOFT_REWARD: Final = "soft_reward"    # 软约束的超额满足量（路口回报）
 
 #: 全部族名（供校验/遍历用）
 ALL_FAMILIES: Final[tuple[str, ...]] = (
@@ -65,7 +66,7 @@ ALL_FAMILIES: Final[tuple[str, ...]] = (
     GW_EDGE_LO, GW_EDGE_HI,
     RW_START, RW_WIDTH, RW_ON, RW_UP_WIN, RW_DOWN_WIN, RW_UP_CYCLE,
     RW_EDGE_START, RW_EDGE_END,
-    AGG, BAL_MIN, BAL_PRESENT, BAL_DEFICIT, SOFT_SLACK,
+    AGG, BAL_MIN, BAL_PRESENT, BAL_DEFICIT, SOFT_SLACK, SOFT_REWARD,
 )
 
 #: margin 短缺的两侧
@@ -221,6 +222,11 @@ def soft_slack(name_base: str, tag: str) -> str:
     return _fmt(SOFT_SLACK, f"{name_base}.{tag}")
 
 
+def soft_reward(name_base: str) -> str:
+    """软约束的超额满足量 ρ（owner=intersection_reward）。"""
+    return _fmt(SOFT_REWARD, f"{name_base}.reward")
+
+
 def edge_name(demand: str, slot: int, node: str, win_slot: int, side: str) -> str:
     """按 `side ∈ {"lo","hi"}` 取绿波边界亲和变量名（兼容 "s"/"e"）。"""
     if side in ("lo", "s"):
@@ -279,7 +285,7 @@ def plan_of(name: str) -> str | None:
         idx = name.find("[")
         body = name[idx + 1:-1]
         return body.split(",", 1)[0] if "," in body else body
-    if family == SOFT_SLACK:
+    if family in (SOFT_SLACK, SOFT_REWARD):
         body = name[len(family) + 1:-1]
         return body.split(".", 1)[0] if "." in body else None
     return None
@@ -299,7 +305,7 @@ __all__ = [
     "GW_MARGIN_LO", "GW_MARGIN_HI", "GW_EDGE_LO", "GW_EDGE_HI",
     "RW_START", "RW_WIDTH", "RW_ON", "RW_UP_WIN", "RW_DOWN_WIN",
     "RW_UP_CYCLE", "RW_EDGE_START", "RW_EDGE_END",
-    "AGG", "BAL_MIN", "BAL_PRESENT", "BAL_DEFICIT", "SOFT_SLACK",
+    "AGG", "BAL_MIN", "BAL_PRESENT", "BAL_DEFICIT", "SOFT_SLACK", "SOFT_REWARD",
     "ALL_FAMILIES", "MARGIN_SIDES",
     "plan_on", "offset", "bnd_delta", "bnd_xdelta", "win_avail",
     "gw_start", "gw_width", "gw_on", "gw_win", "gw_cycle",
@@ -307,6 +313,6 @@ __all__ = [
     "gw_edge_lo", "gw_edge_hi", "edge_name",
     "rw_start", "rw_width", "rw_on", "rw_up_win", "rw_down_win",
     "rw_up_cycle", "rw_edge_start", "rw_edge_end",
-    "agg", "bal_min", "bal_present", "bal_deficit", "soft_slack",
+    "agg", "bal_min", "bal_present", "bal_deficit", "soft_slack", "soft_reward",
     "family_of", "keys_of", "is_family", "plan_of", "offset_intersection",
 ]

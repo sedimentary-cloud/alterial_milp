@@ -10,7 +10,7 @@
 > * 本文：**教学讲解**——每个变量为什么要存在、每条约束在物理上说了什么、
 >   怎么放松、窗口是怎么选出来的，并给出可手算的例子。
 >
-> 代码索引统一写成 `文件:行号`，对应仓库当前版本。
+> 代码索引统一用「文件名 + 函数名/标签名」定位（行号会随重构漂移，见附录 B）。
 
 ---
 
@@ -100,6 +100,7 @@
 | `σ^{m,s}_{b,q,j,k,p}` / `σ^{m,e}_{b,q,j,k,p}` | `gw_margin_lo[...]` / `gw_margin_hi[...]`（多方案时名字带 `p`） | 连续 ≥ 0 | 绿带在节点 j **用第 k 个窗口槽、且选中方案 p 时**的左 / 右 margin 短缺（coef 可逐方案不同） |
 | `σ_c` | `soft_slack[...]` | 连续 ≥ 0 | 第 c 条软约束的违反量 |
 | `t_a` | `agg[{id}]` | 连续 | 具名聚合的值：`min` 时 `t ≤ e_i`、`max` 时 `t ≥ e_i`；方案未选中/不可行时固定 0 |
+| `ρ_c` | `soft_reward[...]` | 连续 ≥ 0 | owner=intersection_reward 的软约束**超额满足量**；未选中方案时固定 0 |
 
 ### 0.4 派生量、常量与参数
 
@@ -117,15 +118,16 @@
 | `hard_min` | `green_mask[seg].margin.start/end.hard_min_s` | 该绿段的 margin 硬下限（0 表示不启用） |
 | `free_s` / `hard_max_s` | `EdgeSpec` | 边界亲和的免费额度 / 硬上限（`green_boundary`、`red_boundary`；§5.10.1、§11.6） |
 | `σ^e` | `gw_edge_lo/hi[...]`、`rw_edge_start/end[...]` | 边界亲和的超出量（slack），每侧一组，乘 `coef` 进 composite |
-| `w_a` | `aggregates[].contributions[].weight` | 具名聚合贡献的权重（正数；符号由 op 与 target 决定，§6.1） |
+| `w_a` | `aggregates[].contributions[].weight` | 具名聚合贡献的正权重；`sign` 显式给出符号，`direction` 显式给出希望 t 的移动方向（§6.1） |
 | `unit` | `const.unit` | `const` 原子单位：`"s"`（默认，秒）或 `"ratio"`（乘周期 C） |
 | `M` | `BigMTable` | big-M；代码里按用途分 `containment` / `plan_activation` / `soft` 三个常量（同值）。详见 §5.14 |
 | `M_hard` / `M_edge` / `Mm` | 局部变量 | 同一个 M 在具体约束里的**局部记法**：`M_hard` = 该行用的硬 M（`containment`）、`M_edge` = 红带相容边的软 M（`soft`）、`Mm` = 红波回绕整数 `m` 的**专用紧 M**（§5.14.4） |
 | `W_g` / `Wr_{r,k}` | — | C13 里：所选上游绿窗 / 下游红窗实例的**最大可能宽度** |
 | `B*` | — | 第一阶段求出的最优 composite 值（Pareto 扫描的基准） |
-| `L` | `expr_loss` | 净路口损失 = `L_raw` + `L_agg`（聚合奖励可为负；Pareto 阶段 2 最小化它） |
-| `L_raw` | — | 不含聚合项的路口损失：`Σ_{owner=intersection_loss} coef·σ`（≥0） |
-| `L_agg` | — | 聚合对路口损失的贡献：`min → −w·t`、`max → +w·t`（§6.1） |
+| `R_int` | `expr_intersection_reward` | 路口回报 = 软约束超额满足 + aggregate 回报项 |
+| `L_int` | `expr_intersection_loss` | 路口损失 = 软约束违反量 + aggregate 损失项 |
+| `I` | `intersection_composite_s` | 路口分数 `= R_int − L_int`（Pareto 第二目标，最大化） |
+| `C` | `intersection_cost_s` / `expr_intersection_cost` | 路口净成本 `= L_int − R_int = −I`（Pareto 内部最小化） |
 | `ε` | — | Pareto 扫描里第 l 个点允许 composite 下降的幅度（最大到 `pareto.relax_max`） |
 | `Σ_p`、`Σ_q`、`Σ_k` | — | 对下标求和 |
 | `lhs` / `rhs` | — | 一条约束的左端表达式 / 右端常数 |
@@ -160,7 +162,8 @@
 | — | `MCC` | McCormick 线性化的四条边 |
 | — | `BALANCED` | 均衡组（`z_g ≤ Β_b / target_b`）与 min_existing 短缺 |
 | — | `AGG` | 具名聚合的包络行（`t ≤/≥ e_i`）与 `x_p` 门控（§6.1） |
-| `V1`～`V12` | `V1`～`V12` | **schema 输入校验规则编号**（`schema/validation.py`），建模前就把坏输入挡掉；例如 V4 节点顺序、V5 节点物理相邻、V7 全局约束不得引用方案作用域原子 |
+| — | `PLAN_REWARD` / `TEMPLATE_REWARD` / `USER_REWARD` | owner=intersection_reward 的奖励松弛行与方案门控 |
+| `V1`～`V13` | `V1`～`V13` | **schema 输入校验规则编号**（`schema/validation.py`），建模前就把坏输入挡掉；例如 V4 节点顺序、V5 节点物理相邻、V7 全局约束不得引用方案作用域原子 |
 
 ### 0.6 重名提醒（同一个字母在本代码/文档里有多个含义）
 
@@ -182,7 +185,7 @@
 | `M` | big-M | 方案边界个数 `m` 的大写形式（本文不用） | 看是不是"系数 × M"的语境；`M_hard` / `M_edge` / `Mm` 都是 big-M 的局部记法 |
 | `h` | 绿窗槽可用性 `h_{i,d,k}` | —— （不是"小时"） | — |
 | `A` | 指示量 `A_{i,p,d,k}` | —— （不是"案例 A"） | — |
-| `L` | 净路口损失（可为负） | —— | — |
+| `I` / `C` | 路口分数（R−L）/ 净成本（L−R） | —— | — |
 
 ---
 
@@ -199,7 +202,8 @@
 | `allow_window_sharing` | 是否允许同一条需求的多条带共用同一个绿窗（§7.4） |
 | `weight` | 目标里这条需求带宽的权重（单位：秒 → 目标仍是秒） |
 | `delta_min_s` / `coef` / `hard_min_s` | 绿段 margin 的期望值 / 罚系数 / 硬下限；写在 `green_mask` 每一段里，不配置 = 没有约束或损失（§5.10，仅绿波） |
-| `aggregates`（`id` / `op` / `plan` / `expressions` / `contributions`） | 具名聚合：对 boundary 线性组合取 `max`/`min`，再按 `contributions[{target, weight}]` 计入 band objective 或 intersection loss；`const` 原子可带 `unit`（s/ratio，可多个混用，§6.1） |
+| `aggregates`（`id` / `op` / `plan` / `expressions` / `contributions`） | 具名聚合：对 boundary 线性组合取 `max`/`min`；`contributions[{target, sign, weight, direction}]` 显式声明贡献方向与符号；`const` 原子可带 `unit`（s/ratio，可多个混用，§6.1） |
+| `soft.owner` | 软约束归属：`band_loss`（带损失）/ `intersection_reward`（路口回报）/ `intersection_loss`（路口损失） |
 | `green_boundary`（`free_s` / `coef` / `hard_max_s`） | 绿波边界亲和：**默认关闭**，只有显式配置需求级 `green_boundary` 或全局 `green_boundary_default` 才生效；开启后超出 `free_s` 的部分按 `coef` 罚，可选硬上限（§5.10.1） |
 | `red_boundary`（`free_s` / `coef` / `hard_max_s`） | 红波边界亲和：前 `free_s` 秒免费、超出按 `coef` 罚、可选硬上限（§11.6） |
 
@@ -747,8 +751,8 @@ M 的取法：按该约束里每个原子在**声明范围内**的最大可能�
 lhs ≤ rhs + σ_c + M(1−x) ,   σ_c ≥ 0
 ```
 
-`σ_c` 是"违反了多少秒"，然后按 `coef` 罚进目标（composite 或 intersection_loss，
-由 `owner` 决定）。**硬约束 = 边界，软约束 = 有价格的边界**，
+`σ_c` 是"违反了多少秒"，然后按 `coef` 记进 `band_loss` / `intersection_reward` / `intersection_loss`，
+由 `owner` 决定。**硬约束 = 边界，软约束 = 有价格的边界**，
 这是建模里最重要的取舍工具，详见 §7.2。
 
 ### 5.4 PLAN_WINDOW：相位自身的合法性
@@ -1169,17 +1173,20 @@ LP 上界**完全相同**（1285.97）。所以"别用 1e6"的**主要**理由�
 composite =  Σ_b weight_b · Σ_q β_{b,q}                    ← 带宽奖励（要最大化）
            − Σ_{绿带 margin} coef_p · σ_p                  ← 逐绿段 margin 短缺罚
            − Σ_{绿带边界亲和} coef · slack                 ← 绿波起点贴合罚
-           − Σ_{软约束, owner=composite} coef · σ          ← 用户软约束罚
+           − Σ_{软约束, owner=band_loss} coef · σ          ← 带损失软约束
            + Σ_{均衡组} group.weight · z_g                 ← 均衡组奖励
            − Σ_{红带边界亲和} coef · slack                 ← 红波边界贴合罚
 
            − pen · deficit                                ← 均衡组 min_existing 短缺罚
                                                             （仅 on_infeasible="skip" 且 pen>0 时）
-           + Σ_{聚合贡献, target=band_objective} ±w·t     ← min→+w·t，max→−w·t（§6.1）
+           + Σ_{聚合贡献, target=band_objective} sign·w·t  ← sign/direction 显式配置（§6.1）
 
-L_raw = Σ_{软约束, owner=intersection_loss} coef · σ        ← 不含聚合的本路口损失（≥0）
-L_agg = Σ_{聚合贡献, target=intersection_loss} ±w·t        ← min→−w·t（抵消），max→+w·t
-L     = L_raw + L_agg                                     ← 阶段 2 最小化的净损失（可为负）
+R_int = Σ_{软约束, owner=intersection_reward} coef · ρ      ← 超额满足量（奖励）
+      + Σ_{聚合贡献, target=intersection_reward} sign·w·t
+L_int = Σ_{软约束, owner=intersection_loss} coef · σ        ← 违反量（损失）
+      + Σ_{聚合贡献, target=intersection_loss} sign·w·t
+I     = R_int − L_int                                     ← 路口分数（Pareto 第二目标，最大化）
+C     = L_int − R_int = −I                                ← 阶段 2 最小化的净成本
 ```
 
 三条设计原则：
@@ -1187,18 +1194,52 @@ L     = L_raw + L_agg                                     ← 阶段 2 最小化
 1. **单位统一**：所有项都是"秒"，系数无量纲。这样"1 秒带宽 vs 1 秒 margin 短缺"
    的取舍才有可解释的价格（margin 逐绿段配置，每个方案/窗口的 σ 有自己的 coef）。
 2. **账本分离**：需要"同时报告带宽和各类损失"的多目标场景，不把所有东西
-   揉进一个加权和，而是把损失归到 `L`、用第二阶段的 ε-constraint 扫 Pareto 前沿
-   （`pareto/`）：先 `max composite` 得到 `B*`，再对若干 `ε` 求解
-   `min L s.t. composite ≥ B* − ε`。这样给出的是一条**前沿**，而不是一个
-   拍脑袋的权重。
+   揉进一个加权和，而是把带分数 `B` 和路口分数 `I` 都保留、用第二阶段的
+   ε-constraint 扫 Pareto 前沿（`pareto/`）：先 `max composite` 得到 `B*`，
+   再对若干 `ε` 求解 `min C s.t. B ≥ B* − ε`，其中 `C = −I`。
+   这样给出的是一条**前沿**，而不是一个拍脑袋的权重。
 3. **均衡组**（`builder.py`）：`z_g ≤ Β_b / target_b`（组内需求带宽的
    归一化最小值），把 `weight·z_g` 加进目标 → "两个方向都要好，
    而不是一个方向特别宽、另一个为零"。这是"公平性"的线性化标准做法。
 
-### 6.1 具名聚合：boundary 的 max/min 与均衡奖励
+### 6.1 路口分数与具名聚合
 
-`aggregates` 定义一组「对线性表达式取最大/最小」的标量值，再通过 `contributions`
-把该值加权计入 band objective（composite）或 intersection loss。表达式只允许
+#### 6.1.1 路口回报、路口损失与路口分数
+
+带目标 `B` 里有正有负；现在路口也采用同样的结构：
+
+```
+R_int = 回报（正）      L_int = 损失（正）
+I     = R_int − L_int                    ← 路口分数（第二目标，最大化）
+C     = L_int − R_int = −I               ← 净成本（Pareto 内部最小化）
+```
+
+软约束的 `soft.owner` 决定这笔账记到哪里：
+
+| owner | 含义 | 线性化 |
+|---|---|---|
+| `band_loss` | 带损失：违反量从 `composite` 中扣除 | 违反量 `σ ≥ …`，`composite −= coef·σ` |
+| `intersection_loss` | 路口损失：违反量进 `L_int` | 违反量 `σ ≥ …`，`L_int += coef·σ` |
+| `intersection_reward` | 路口回报：**超额满足量**进 `R_int` | `ρ ≥ …`，`R_int += coef·ρ` |
+
+`intersection_reward` 的奖励语义：
+
+| sense | 奖励 | 线性化 |
+|---|---|---|
+| `≤` | `max(0, rhs − lhs)` | `ρ ≥ rhs − lhs` |
+| `≥` | `max(0, lhs − rhs)` | `ρ ≥ lhs − rhs` |
+| `==` | 无定义，校验报错 | — |
+
+例如 `phase_duration ≥ 10s` 配 `owner=intersection_reward`：超过 10s 的部分每秒奖励
+`coef`；不足 10s 不罚。如果既要奖也要罚，写两条软约束（一条 reward、一条 loss），
+即可组成目标区间。
+
+注意：reward 约束**不是硬约束**；需要强制边界时另写 `hard=true` 的约束。
+
+#### 6.1.2 具名聚合
+
+`aggregates` 定义一组「对线性表达式取最大/最小」的标量值 `t = agg[id]`，
+再通过显式 `contributions` 计入带目标/路口回报/路口损失。表达式只允许
 **boundary 的线性组合 + 常数项**；所有 boundary 必须属于同一个 `plan`。
 
 ```json
@@ -1216,46 +1257,64 @@ L     = L_raw + L_agg                                     ← 阶段 2 最小化
                "direction": "up", "index": 1}, "coef": -1.0}]
   ],
   "contributions": [
-    {"target": "intersection_loss", "weight": 1.0}
+    {"target": "intersection_reward", "sign": 1,
+     "weight": 1.0, "direction": "maximize"}
   ]
 }]
 ```
 
-**建模**：建辅助变量 `t = agg[{id}]`；`min` 用上包络 `t ≤ e_i`，`max` 用下包络
-`t ≥ e_i`；全部表达式都是常数时直接折叠成常数，不建变量。
+**建模**：`min` 用上包络 `t ≤ e_i`，`max` 用下包络 `t ≥ e_i`；全常数表达式直接折叠。
 
-**多方案门控**：aggregate 绑定 `plan`。路口有多个方案时用 `x_p` 门控：
+**多方案门控**：aggregate 绑定 `plan`。多方案路口用 `x_p` 门控：
 
 ```
-t ≥ L·x_p,  t ≤ U·x_p                    ← 未选中时 t = 0（贡献为 0）
-max: t ≥ e_i − M(1−x_p)                  ← 选中时下包络
-min: t ≤ e_i + M(1−x_p)                  ← 选中时上包络
+t ≥ L·x_p,  t ≤ U·x_p                    ← 未选中时 t = 0
+max: t ≥ e_i − M(1−x_p)
+min: t ≤ e_i + M(1−x_p)
 ```
 
-绑定的方案在本格点被预处理丢掉时也按 `t ≡ 0`（`on_unavailable="zero"`）。
-单方案/固定方案路口没有 `x_p`，直接生效。
+方案在格点被丢弃时 `t ≡ 0`；单方案/固定方案无 `x_p`。
 
-**贡献方向**：用户只写正权重，符号由 `op` 与 `target` 自动决定（保证 `t`
-被推向包络的正确方向）：
+**贡献必须显式写符号、方向和目标**，求解器不推导：
 
-| op | target | 写入 | 语义 |
-|---|---|---|---|
-| `min` | `band_objective` | `+w·t` | 奖励越大越好（最大化 min） |
-| `min` | `intersection_loss` | `−w·t` | 抵消路口损失（净损失最小化） |
-| `max` | `band_objective` | `−w·t` | 罚项（最小化 max） |
-| `max` | `intersection_loss` | `+w·t` | 罚项 |
+```json
+{"target": "band_objective" | "intersection_reward" | "intersection_loss",
+ "sign": 1 | -1,
+ "weight": 1.0,
+ "direction": "maximize" | "minimize"}
+```
 
-**报告**：`intersection_loss_s` 是净损失 `raw_intersection_loss_s + aggregate_loss_s`
-（可为负）；`aggregates` 给出每个聚合在选中方案下的真实值（未选中为 0）。
+只有四种组合是精确的：
+
+| op | target | sign | direction | 写入 |
+|---|---|---|---|---|
+| `min` | `band_objective` | `+1` | `maximize` | `composite += w·t` |
+| `min` | `intersection_reward` | `+1` | `maximize` | `R_int += w·t` |
+| `max` | `band_objective` | `-1` | `minimize` | `composite −= w·t` |
+| `max` | `intersection_loss` | `+1` | `minimize` | `L_int += w·t` |
+
+其余组合（例如 `max` + 正系数进带目标、`min` 进路口损失、`sign=-1` 的回报/损失、
+`direction` 与 `op` 矛盾）全部校验报错。
+
+**报告**：
+
+```
+intersection_reward_s      = R_int
+intersection_loss_s        = L_int（原始损失）
+intersection_composite_s   = R_int − L_int
+intersection_cost_s        = L_int − R_int
+loss_s（兼容名）            = intersection_cost_s
+```
+
+`aggregates` 给出每个聚合在选中方案下的真实值（未选中为 0）。
 
 **注意**：
 
 * 聚合只用于目标/损失；硬约束（如“每个相位 ≥ 8s”）直接写
-  `plan.hard_constraints` 的普通线性行，更简单、语义也更明确；
-* balanced group 就是 `min` 聚合 + band objective 奖励，本机制是它的推广，
-  暂不替换 balanced group；
-* 只有 `target=band_objective` 的聚合会进入阶段 1 的 composite，从而让多阶段
-  语义分解回退完整 MILP；只贡献 `intersection_loss` 的聚合在阶段 1 不可见，
+  `plan.hard_constraints` 的普通线性行；
+* balanced group 就是 `min` 聚合 + band objective 奖励；
+* 只有 `target=band_objective` 的聚合会进入阶段 1 的 composite，从而使多阶段
+  语义分解回退完整 MILP；`intersection_reward/loss` 的聚合在阶段 1 不可见，
   仍可走多阶段语义分解（子问题丢弃聚合、拼装完整解时补出 `t`）。
 
 ---
@@ -1276,7 +1335,7 @@ min: t ≤ e_i + M(1−x_p)                  ← 选中时上包络
 **用途**：允许违反，但按价格惩罚。
 **形式**：`lhs ≤ rhs + σ`，`σ ≥ 0`，目标里 `−coef·σ`。
 **出现位置**：C3 方案内软约束、C8 margin、C10 用户软约束。
-**要点**：`owner` 决定罚项进哪个账本（composite 还是 L）；
+**要点**：`owner` 决定进哪个账本（`band_loss` / `R_int` / `L_int`）；
 报告时要**重算真实违反量**，不要直接读 σ。
 
 ### 7.3 硬下限式收紧（有时"放松"的反面才是你要的）
@@ -1693,6 +1752,6 @@ gap_end   = (φ_up + ê_g + τ) − (u + β)    ← 红带终点比上游绿窗�
 | 具名聚合（包络 + x_p 门控 + 贡献） | `builder.py` 的 `_build_aggregates` |
 | 用户全局/模板约束 | `builder.py` 的 `_build_user_constraints` / `_build_constraint_templates` |
 | 带槽数裁剪 | `greenwave/preprocess/context.py` 的 `demand_max_bands` |
-| 目标装配 | `builder.py` 的 `expr_composite` / `expr_loss` |
+| 目标装配 | `builder.py` 的 `expr_composite` / `expr_intersection_reward` / `expr_intersection_loss` / `expr_intersection_cost` |
 | 解码与损失重算（margin + 贴合） | `greenwave/report/solution.py` 的 `SolutionDecoder.decode` / `_actual_green_penalties` |
 | 教学小案例（本文 §8 的数字来源） | `examples/tutorial_small_cases.py` |

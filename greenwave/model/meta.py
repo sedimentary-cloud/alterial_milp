@@ -55,6 +55,18 @@ class SoftPenaltyRef:
     label: str = ""
 
 
+# 一条软约束的奖励引用（owner=intersection_reward 的超额满足量）。
+@dataclass
+class SoftRewardRef:
+    constraint_id: str
+    expr: LinearExpr
+    sense: str                 # "<=" 或 ">="
+    rhs: float
+    coef: float
+    plan_id: str | None = None
+    label: str = ""
+
+
 # 一条绿波需求的 margin 短缺变量集合。
 # 现在 margin 逐方案、逐绿窗、逐侧配置，coef 也可能不同，所以按 (变量, 系数) 存。
 @dataclass
@@ -149,6 +161,7 @@ class ModelMeta:
     green: dict[str, GreenDemandModel] = field(default_factory=dict)
     red_demands: dict[str, RedDemandModel] = field(default_factory=dict)
     soft: list[SoftPenaltyRef] = field(default_factory=list)
+    rewards: list[SoftRewardRef] = field(default_factory=list)
     margins: list[MarginSlackRef] = field(default_factory=list)
     red_boundary: list[BoundarySlackRef] = field(default_factory=list)
     # 绿波边界亲和：带端离本节点绿窗对应端点的松弛量。
@@ -164,6 +177,6 @@ class ModelMeta:
 RedBoundarySlackRef = BoundarySlackRef
 
 
-__all__ = ["BigMTable", "SoftPenaltyRef", "MarginSlackRef", "BoundarySlackRef",
+__all__ = ["BigMTable", "SoftPenaltyRef", "SoftRewardRef", "MarginSlackRef", "BoundarySlackRef",
            "RedBoundarySlackRef", "GreenDemandModel", "RedDemandModel",
            "BalancedGroupModel", "AggregateModel", "ModelMeta"]

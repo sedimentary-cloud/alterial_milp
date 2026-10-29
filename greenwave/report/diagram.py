@@ -305,9 +305,15 @@ class ParetoFrontierDiagram:
         divisor = float(cycle_s) if (normalize_by_cycle and cycle_s) else 1.0
         records = []
         for p in points:
+            if p.get("intersection_composite") is not None:
+                inter = float(p["intersection_composite"]) / divisor
+            else:
+                # 兼容旧数据：没有路口分数时用 -loss 近似（loss 为原始损失）。
+                inter = -float(p.get("intersection_loss",
+                                       p.get("intersection_loss_s", 0.0))) / divisor
             records.append({
                 "composite": float(p.get("composite_actual", p.get("composite_actual_s", 0.0))) / divisor,
-                "loss": float(p.get("intersection_loss", p.get("intersection_loss_s", 0.0))) / divisor,
+                "intersection": inter,
                 "epsilon": float(p.get("epsilon", p.get("epsilon_s", 0.0))),
             })
         front = _non_dominated(records)
@@ -318,23 +324,23 @@ class ParetoFrontierDiagram:
                     transform=ax.transAxes, fontsize=12)
             ax.set_title(title or "Pareto Frontier")
         else:
-            ordered = sorted(front, key=lambda rec: (rec["composite"], rec["loss"]))
+            ordered = sorted(front, key=lambda rec: (rec["composite"], rec["intersection"]))
             xs = [r["composite"] for r in ordered]
-            ys = [r["loss"] for r in ordered]
+            ys = [r["intersection"] for r in ordered]
             ax.plot(xs, ys, color="#1f77b4", linewidth=1.6, marker="o",
                     markersize=6, markerfacecolor="white", markeredgewidth=1.6, zorder=3)
             for idx, rec in enumerate(ordered, start=1):
                 ax.annotate(f"P{idx}\nε={rec['epsilon']:.1f}s",
-                            (rec["composite"], rec["loss"]),
+                            (rec["composite"], rec["intersection"]),
                             textcoords="offset points", xytext=(7, 6),
                             fontsize=8, color="#1f77b4", zorder=4)
             if normalize_by_cycle and cycle_s:
                 ax.set_xlabel("Composite band objective / C  →  better")
-                ax.set_ylabel("Intersection loss / C  ↓  better")
+                ax.set_ylabel("Intersection composite / C  →  better")
             else:
                 ax.set_xlabel("Composite band objective (s)  →  better")
-                ax.set_ylabel("Intersection loss (s)  ↓  better")
-            ax.set_title(title or "Pareto Frontier: composite vs intersection loss")
+                ax.set_ylabel("Intersection composite (s)  →  better")
+            ax.set_title(title or "Pareto Frontier: band vs intersection composite")
             ax.grid(alpha=0.30, zorder=0)
             ax.margins(x=0.10, y=0.18)
         fig.tight_layout()
@@ -566,7 +572,7 @@ def _time_max(corridor, ctx, solution, n_cycles: int | None = None) -> float:
 
 
 def _non_dominated(records: list[dict]) -> list[dict]:
-    """Keep points not dominated in (maximize composite, minimize loss)."""
+    """Keep points not dominated in (maximize composite, maximize intersection)."""
     tol = 1e-9
     out = []
     for i, p in enumerate(records):
@@ -575,9 +581,9 @@ def _non_dominated(records: list[dict]) -> list[dict]:
             if i == j:
                 continue
             if (q["composite"] >= p["composite"] - tol
-                    and q["loss"] <= p["loss"] + tol
+                    and q["intersection"] >= p["intersection"] - tol
                     and (q["composite"] > p["composite"] + tol
-                         or q["loss"] < p["loss"] - tol)):
+                         or q["intersection"] > p["intersection"] + tol)):
                 dominated = True
                 break
         if not dominated:
@@ -585,7 +591,7 @@ def _non_dominated(records: list[dict]) -> list[dict]:
     # remove duplicates
     unique = {}
     for p in out:
-        key = (round(p["composite"], 6), round(p["loss"], 6))
+        key = (round(p["composite"], 6), round(p["intersection"], 6))
         unique.setdefault(key, p)
     return list(unique.values())
 

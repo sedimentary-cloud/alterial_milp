@@ -201,7 +201,7 @@ class TestDocumentCases(unittest.TestCase):
         red_edge_viols = [v for v in sol["constraint_violations"]
                           if v["id"].startswith("red_boundary")]
         self.assertTrue(red_edge_viols)
-        self.assertTrue(all(v["owner"] == "composite" for v in red_edge_viols))
+        self.assertTrue(all(v["owner"] == "band_loss" for v in red_edge_viols))
         # composite = weight * band - red boundary loss
         boundary_loss = sum(v["cost"] for v in red_edge_viols)
         self.assertAlmostEqual(grid["composite_best"],
@@ -405,7 +405,7 @@ class TestDocumentCases(unittest.TestCase):
         soft = [{"id": "g_soft", "terms": [{"atom": {"kind": "bandwidth", "demand": "GW_up"},
                                              "coef": 1.0}],
                  "sense": ">=", "rhs": 50.0, "hard": False,
-                 "soft": {"coef": 2.0, "owner": "composite"}}]
+                 "soft": {"coef": 2.0, "owner": "band_loss"}}]
         out2 = run(_base_problem(cycle=90.0, margin=0.0, global_constraints=soft))
         # 40.5 - 2 * (50 - 40.5) = 21.5
         self.assertAlmostEqual(out2["grid_results"][0]["composite_best"], 21.5, places=3)

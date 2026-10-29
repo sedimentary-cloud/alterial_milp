@@ -459,7 +459,7 @@ def _solve_group(problem: ProblemInput, ctx: GridPointContext, group: DemandGrou
 def _group_penalty_composite(problem: ProblemInput, plan_id: str,
                              adjustments_r: Mapping[tuple[str, str, int], float],
                              cycle_s: float) -> float:
-    """某个方案在固定 δ 下**计入 composite** 的常数罚（owner=composite 的软约束）。
+    """某个方案在固定 δ 下**计入 composite** 的常数罚（owner=band_loss 的软约束）。
 
     链式 DP 里接口路口被两个组共享，这份常数罚会被两边各计一次；用它做一次扣除，
     保证 Σ_g f_g 与整模 composite 的口径一致。
@@ -472,7 +472,7 @@ def _group_penalty_composite(problem: ProblemInput, plan_id: str,
     meas = FeasibilityFilter(problem)
     total = 0.0
     for c in plan.soft_constraints:
-        if c.soft is None or c.soft.owner != "composite":
+        if c.soft is None or c.soft.owner != "band_loss":
             continue
         lhs = meas._constraint_value(plan, c, cycle_s, deltas)  # noqa: SLF001
         rhs = c.rhs_for_cycle(cycle_s)

@@ -53,7 +53,7 @@
 | 带需求（BandDemand） | 用户声明的一条优化目标单元：{方向, 有序节点列表, 类型(绿/红), 每周期最大带数, 权重}。红带需求强制节点数 = 2；margin 不在需求上，而是逐方案、逐绿段配置 |
 | 窗口绿波 | 起讫路口为干线中间某两路口的链式绿带（部分干线绿波），与全程绿波同为链式带需求的特例 |
 | 相位边界 / green_mask | 方案把每个方向的周期用有序边界切成区间；`green_mask` 是**对象列表**，每项 `{green, margin}` 标记颜色与该绿段两端的 margin；绿窗和红窗均为派生量（3.3） |
-| composite band objective | 干线目标 = 所有带需求的带宽加权和 − margin 短缺罚 − owner 为 composite 的软约束罚（单位：秒） |
+| composite band objective | 干线目标 = 带需求的带宽加权和 − margin 短缺罚 − owner=band_loss 的软约束罚 − 带损失聚合项（单位：秒） |
 | 路口损失（intersection loss） | 路口相位边界线性组合的软约束违反量 × 强度系数之和（单位：秒），仅选中方案激活 |
 | margin（端点净距） | 绿带端点到其所用绿灯窗口对应端点的距离；逐方案、逐绿段配置（绿窗口的起/终点分别取首/末绿段的配置），不足期望净距 δ_min 的部分计为短缺并罚款。红带无 margin；同色边界与红段上的配置忽略 |
 
@@ -67,13 +67,13 @@
 采用两阶段 ε-constraint：
 
 - 阶段 1：在每个 (C, κ) 格点上最大化 composite，得 B*(C, κ)；
-- 阶段 2：在最优格点（可配 top-k）上，依次求解 `min L s.t. composite ≥ B* − ε_l`，ε_l 从 0 递增，得到 pareto 前沿上的若干解。
+- 阶段 2：在最优格点（可配 top-k）上，依次求解 `min C = L_int − R_int s.t. composite ≥ B* − ε_l`，ε_l 从 0 递增，得到 pareto 前沿上的若干解。
 
 ### 1.5 设计原则
 
 1. **格点化是结构而非技巧**：C 与 κ 固定后，全部行程时间为常数，模型内无任何双线性项（除方案选择 × 微调量，用标准方法线性化）；
 2. **存在性指示**：所有带、所有带-窗口指派均有存在性 / 指派二进制，约束经 big-M 激活，模型在数据合法时恒可行（带可以全部不存在）；
-3. **统一软约束机制**：路口损失、margin 罚、用户软约束共用同一套「线性表达式 + 违反量 × 系数 + owner 归属」机制；
+3. **统一软约束机制**：路口回报/损失、margin 罚、用户软约束共用同一套「线性表达式 + 违反量/超额满足量 × 系数 + owner 归属」机制；
 4. **约束表达式系统**：用户自定义约束 = 预定义变量原子的线性组合与常数比较，声明硬 / 软；
 5. **求解器可替换**：建模层不依赖 scipy 特有 API，求解适配层可切换 highspy。
 
@@ -209,7 +209,7 @@ boundary(intersection, plan, direction, index)
 - `window_duration`：派生绿窗时长；
 - `red_duration`：plan-native 红窗时长，`window` 是 `rid`（1..K）；
 - 边界排序 + `min_phase_s` 由建模器内置生成，无需用户声明；
-- 软约束违反量 × `coef` 计入路口损失或 composite。
+- 软约束违反量/超额满足量 × `coef` 计入 `band_loss` / `R_int` / `L_int`。
 
 #### 3.3.4 方案可行性
 
@@ -280,7 +280,7 @@ boundary(intersection, plan, direction, index)
   "sense": "<=",
   "rhs": 30.0,
   "hard": true,
-  "soft": {"coef": 5.0, "owner": "composite"}
+  "soft": {"coef": 5.0, "owner": "band_loss"}
 }
 ```
 
@@ -295,10 +295,14 @@ boundary(intersection, plan, direction, index)
 
 规则：
 
-- `hard: true` → 硬约束；`hard: false` → 必须给 `soft.coef` 与 `soft.owner ∈ {"composite", "intersection_loss"}`；
+- `hard: true` → 硬约束；`hard: false` → 必须给 `soft.coef` 与
+  `soft.owner ∈ {"band_loss", "intersection_reward", "intersection_loss"}`；
+  `intersection_reward` 表示**超额满足量**奖励（`<=` / `>=`，不支持 `==`）；
 - 方案内约束可引用 `boundary` / `window_duration` / `red_duration` 原子，仅在方案选中时生效（big-M 激活）；
 - 全局约束（跨路口、带宽类）不得引用 `boundary` / `window_duration` / `red_duration` 原子（避免方案归属歧义）；
-- 违反量定义：`expr ≤ rhs` 的违反 = max(0, expr − rhs)；`expr ≥ rhs` 对称；`=` 拆成两个方向各计违反。
+- 违反量定义：`expr ≤ rhs` 的违反 = max(0, expr − rhs)；`expr ≥ rhs` 对称；`=` 拆成两个方向各计违反；
+- 奖励量定义（`owner=intersection_reward`）：`expr ≥ rhs` 的奖励 = max(0, expr − rhs)；
+  `expr ≤ rhs` 对称；`=` 不允许奖励。
 
 ### 3.7 GridConfig（格点配置）
 
@@ -335,7 +339,7 @@ boundary(intersection, plan, direction, index)
 | V8 | 周期、速度、距离为正；倍率 > 0 |
 | V9 | 每个路口至少 1 个方案（格点级可行性由 §5 判定） |
 | V10 | 绿段 margin：`delta_min_s ≥ 0`、`hard_min_s ≥ 0`、`hard_min_s ≤ delta_min_s`、小于窗口宽度；同色边界/红段上的 margin 给警告并忽略 |
-| V13 | 具名聚合：id 唯一、op ∈ {max,min}、表达式只允许 boundary/const、boundary 必须绑定同一 plan 且下标合法、contributions 的 target/weight 合法 |
+| V13 | 具名聚合：id 唯一、op ∈ {max,min}、表达式只允许 boundary/const、boundary 必须绑定同一 plan 且下标合法、contributions 的 target/sign/weight/direction 组合合法 |
 
 ### 3.10 AggregateSpec（具名聚合）
 
@@ -352,7 +356,8 @@ boundary(intersection, plan, direction, index)
                "direction": "up", "index": 0}, "coef": -1.0}]
   ],
   "contributions": [
-    {"target": "intersection_loss", "weight": 1.0}
+    {"target": "intersection_reward", "sign": 1,
+     "weight": 1.0, "direction": "maximize"}
   ]
 }
 ```
@@ -362,8 +367,10 @@ boundary(intersection, plan, direction, index)
   `unit`（`s` 默认 / `ratio` 乘 C），同一个表达式可混用多个常数；
 - `plan`：所有 boundary 原子必须属于该方案（`plan=null` 时只能是纯常数表达式）；
   方案在本格点不可行时聚合不可用（`on_unavailable="zero"`）；
-- `contributions`：`{target, weight}`，`target ∈ {band_objective, intersection_loss}`，
-  `weight > 0`；符号由 `op` 与 `target` 自动决定（见 4.4）；
+- `contributions`：`{target, sign, weight, direction}`，全部显式声明；
+  `target ∈ {band_objective, intersection_reward, intersection_loss}`，
+  `sign ∈ {+1,-1}`，`weight > 0`，`direction ∈ {maximize,minimize}`；
+  只有四种精确组合（见 4.4），其余校验报错；
 - 聚合只用于目标/损失，**不能出现在约束里**；硬约束直接写
   `plan.hard_constraints` 的线性行（`min(E) ≥ B` 等价于每条 `e_i ≥ B`）。
 
@@ -444,7 +451,7 @@ expr ≤ rhs + M·(1 − x_{i,p})            （sense 为 ≤；≥、= 对称�
 
 注意端点秒值 = `(s̄ + δ)·C`，其中 δ 经 C1 与 z 的联动仅在 x=1 时有意义；M(1−x) 保证未选中时松弛。
 
-**C3 方案内软约束**（owner = intersection_loss）
+**C3 方案内软约束**（owner = band_loss / intersection_reward / intersection_loss）
 
 ```
 expr ≤ rhs + σ_c + M·(1 − x_{i,p})
@@ -593,21 +600,32 @@ u_{b,q} + β_{b,q} ≤ u_{b,q2} + M·(2 − e_{b,q} − e_{b,q2})    ∀ q < q2
 ```
 composite = Σ_b weight_b · Σ_q β_{b,q}
           − Σ_{b(green),q,j,p} coef_p · (σ^{m,s}_{b,q,j,p} + σ^{m,e}_{b,q,j,p})
-          − Σ_{c ∈ soft, owner=composite} coef_c · σ_c
+          − Σ_{c ∈ soft, owner=band_loss} coef_c · σ_c
           + Σ_{a: target=band_objective} sign_a · w_a · t_a
 
-L_raw     = Σ_{c ∈ soft, owner=intersection_loss} coef_c · σ_c
-L_agg     = Σ_{a: target=intersection_loss} sign_a · w_a · t_a
-L         = L_raw + L_agg
+R_int = Σ_{c ∈ soft, owner=intersection_reward} coef_c · ρ_c
+      + Σ_{a: target=intersection_reward} sign_a · w_a · t_a
+L_int = Σ_{c ∈ soft, owner=intersection_loss} coef_c · σ_c
+      + Σ_{a: target=intersection_loss} sign_a · w_a · t_a
+I     = R_int − L_int
+C     = L_int − R_int = −I
 ```
 
-其中 `t_a` 是具名聚合值：`min` 用上包络 `t_a ≤ e_i`、`max` 用下包络 `t_a ≥ e_i`；
-`sign_a` 由 op 与 target 决定（min→band: +，min→loss: −，max→band: −，max→loss: +）。
+其中 `t_a` 是具名聚合值：`min` 用上包络 `t_a ≤ e_i`、`max` 用下包络 `t_a ≥ e_i`。
+聚合贡献的四种精确组合：
+
+| op | target | sign | direction |
+|---|---|---|---|
+| `min` | `band_objective` | `+1` | `maximize` |
+| `min` | `intersection_reward` | `+1` | `maximize` |
+| `max` | `band_objective` | `-1` | `minimize` |
+| `max` | `intersection_loss` | `+1` | `minimize` |
+
 多方案路口用 `x_p` 门控，未选中时 `t_a = 0`；方案在格点不可行时也按 0。
 
 - 单位统一为秒；margin 短缺与软罚的系数无量纲；
-- 簿记规则：**margin 类罚项全部归 composite**（已锁定）；方案内端点软约束全部归 L；用户全局软约束与聚合贡献按声明的 owner 归集；
-- `L` 可以因为聚合奖励而为负，报告里同时给 `raw_intersection_loss_s` / `aggregate_loss_s`。
+- 簿记规则：**margin 类罚项全部归 composite**（已锁定）；方案内端点软约束按 owner 归 `band_loss` / `R_int` / `L_int`；用户全局软约束与聚合贡献按声明的 owner 归集；
+- `I` 可以因为奖励大于损失而为正，`C` 可以为负；报告同时给 `intersection_reward_s` / `intersection_loss_s` / `intersection_composite_s` / `intersection_cost_s`。
 
 ### 4.5 两阶段求解
 
@@ -618,16 +636,16 @@ L         = L_raw + L_agg
 ```
 for l = 0..K_pareto:
     ε_l = (l / K_pareto) · relax_max · B*
-    min  L
+    min  C = L_int − R_int
     s.t. composite ≥ B* − ε_l
          （其余约束不变）
 ```
 
-- **l = 0 必须求解**：阶段 1 只保证 composite 最大，达到 B* 的解损失可能天差地别，ε=0 给出 pareto 前沿的低损失端点；
+- **l = 0 必须求解**：阶段 1 只保证 composite 最大，达到 B* 的解路口分数可能天差地别，ε=0 给出 pareto 前沿的高路口分数端点；
 - 报告每个点的**实际 composite 值**（求解器只保证下界，实际可能更高）；
 - 每个 ε 点输出完整方案（见 §8）；
 - 多阶段加速：`target=band_objective` 的聚合进入阶段 1 的 composite，会使语义分解回退完整 MILP；
-  只贡献 `intersection_loss` 的聚合在阶段 1 不可见，仍可走语义分解（子问题丢弃聚合、拼装时补出 `t`）。
+  `intersection_reward/loss` 的聚合在阶段 1 不可见，仍可走语义分解（子问题丢弃聚合、拼装时补出 `t`）。
 
 ### 4.6 big-M 取值规范
 
@@ -803,7 +821,10 @@ scipy 无法获取 IIS。提供「分块软化」调试器：按约束组（C1�
       {
         "epsilon": 0.0,
         "composite_actual": 42.5,
+        "intersection_reward": 6.0,
         "intersection_loss": 18.0,
+        "intersection_composite": -12.0,
+        "intersection_cost": 12.0,
         "solution": {
           "plan_selection": {"I1": "I1_P2", "I2": "I2_P1"},
           "offsets_s": {"I1": 0.0, "I2": 33.5},
@@ -813,7 +834,11 @@ scipy 无法获取 IIS。提供「分块软化」调试器：按约束组（C1�
              "width_s": 21.0, "start_at_anchor_s": 5.0,
              "windows": {"I1": 1, "I2": 2}}
           ],
-          "constraint_violations": [{"id": "c7", "violation_s": 3.0, "cost": 15.0, "owner": "composite"}]
+          "constraint_violations": [{"id": "c7", "violation_s": 3.0, "cost": 15.0, "owner": "band_loss"}],
+          "intersection_reward_s": 6.0,
+          "intersection_loss_s": 18.0,
+          "intersection_composite_s": -12.0,
+          "intersection_cost_s": 12.0
         }
       }
     ]
@@ -917,7 +942,7 @@ class LinearTerm(BaseModel, frozen=True):
 
 class SoftPenalty(BaseModel, frozen=True):
     coef: float               # 无量纲强度系数
-    owner: Literal["composite", "intersection_loss"]
+    owner: Literal["band_loss", "intersection_reward", "intersection_loss"]
 
 class ConstraintSpec(BaseModel, frozen=True):
     id: str
@@ -1307,7 +1332,10 @@ class GridRunReport:
 class ParetoPoint:
     epsilon_s: float
     composite_actual_s: float        # 用解向量重算的实际值，不取下界（4.5）
-    intersection_loss_s: float
+    intersection_reward_s: float
+    intersection_loss_s: float       # 原始损失 L_int
+    intersection_composite_s: float  # R_int − L_int（第二目标）
+    intersection_cost_s: float       # L_int − R_int（Pareto 内部最小化）
     solution: "SolutionRecord"
 
 class EpsilonConstraintScanner:
@@ -1315,9 +1343,9 @@ class EpsilonConstraintScanner:
                  backend: SolverBackend, cfg: ParetoConfig) -> None: ...
     def scan(self, base: GridPointResult) -> list[ParetoPoint]:
         """复用同一 ModelSession：
-        1. set_objective(model.expr_loss(), "min")；
+        1. set_objective(model.expr_intersection_cost(), "min")；
         2. l = 0..num_points：add_constraint(expr_composite() >= B* − ε_l, meta=EPS)，
-           solve，用 values 重算 composite 实际值；
+           solve；再固定 intersection cost 最优值并最大化 composite；用 values 重算实际值；
         3. 每点经 SolutionDecoder 解码。"""
 ```
 

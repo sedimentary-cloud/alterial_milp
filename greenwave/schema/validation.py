@@ -52,9 +52,15 @@ def _validate_constraint_static(c: ConstraintSpec, *, is_global: bool,
         issues.append(ValidationIssue("error", "V6",
                                       f"{owner_label} soft constraint {c.id!r} requires soft penalty",
                                       (c.id,)))
-    if c.soft is not None and c.soft.owner not in ("composite", "intersection_loss"):
+    if c.soft is not None and c.soft.owner not in (
+            "band_loss", "intersection_reward", "intersection_loss"):
         issues.append(ValidationIssue("error", "V6",
                                       f"{owner_label} constraint {c.id!r} has invalid owner",
+                                      (c.id,)))
+    if c.soft is not None and c.soft.owner == "intersection_reward" and c.sense == "==":
+        issues.append(ValidationIssue("error", "V6",
+                                      f"{owner_label} constraint {c.id!r} cannot use "
+                                      f"intersection_reward with equality sense",
                                       (c.id,)))
     for t in c.terms:
         a = t.atom
@@ -438,7 +444,14 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
             issues.append(ValidationIssue("error", "V6",
                                           f"constraint template {tmpl.id!r} requires soft penalty",
                                           (tmpl.id,)))
-        if tmpl.soft is not None and tmpl.soft.owner not in ("composite", "intersection_loss"):
+        if (tmpl.soft is not None and tmpl.soft.owner == "intersection_reward"
+                and tmpl.sense == "=="):
+            issues.append(ValidationIssue("error", "V6",
+                                          f"constraint template {tmpl.id!r} cannot use "
+                                          f"intersection_reward with equality sense",
+                                          (tmpl.id,)))
+        if tmpl.soft is not None and tmpl.soft.owner not in (
+                "band_loss", "intersection_reward", "intersection_loss"):
             issues.append(ValidationIssue("error", "V6",
                                           f"constraint template {tmpl.id!r} has invalid owner",
                                           (tmpl.id,)))
@@ -526,15 +539,33 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                 "warning", "V13",
                 f"aggregate {a.id!r} has no contributions (unused)", (a.id,)))
         for c in a.contributions:
-            if c.target not in ("band_objective", "intersection_loss"):
+            if c.target not in ("band_objective", "intersection_reward",
+                                "intersection_loss"):
                 issues.append(ValidationIssue(
                     "error", "V13",
                     f"aggregate {a.id!r} has invalid contribution target {c.target!r}",
                     (a.id,)))
+            if c.sign not in (-1, 1):
+                issues.append(ValidationIssue(
+                    "error", "V13",
+                    f"aggregate {a.id!r} contribution sign must be +1 or -1", (a.id,)))
             if c.weight <= 0.0:
                 issues.append(ValidationIssue(
                     "error", "V13",
                     f"aggregate {a.id!r} contribution weight must be > 0", (a.id,)))
+            if c.target == "band_objective":
+                legal = ((a.op == "min" and c.sign == 1 and c.direction == "maximize")
+                         or (a.op == "max" and c.sign == -1 and c.direction == "minimize"))
+            elif c.target == "intersection_reward":
+                legal = (a.op == "min" and c.sign == 1 and c.direction == "maximize")
+            else:
+                legal = (a.op == "max" and c.sign == 1 and c.direction == "minimize")
+            if not legal:
+                issues.append(ValidationIssue(
+                    "error", "V13",
+                    f"aggregate {a.id!r} contribution "
+                    f"(target={c.target!r}, sign={c.sign}, direction={c.direction!r}) "
+                    f"is not exact for op={a.op!r}", (a.id,)))
 
     return issues
 

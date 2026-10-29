@@ -30,7 +30,7 @@ Direction = Literal["up", "down"]
 Side = Literal["start", "end"]
 AtomKind = Literal["offset", "boundary", "window_duration", "red_duration", "bandwidth", "const"]
 Unit = Literal["s", "ratio"]
-Owner = Literal["composite", "intersection_loss"]
+Owner = Literal["band_loss", "intersection_reward", "intersection_loss"]
 ConstraintScopeKind = Literal["all_plan_windows", "all_plan_red_windows", "specific_plan_windows", "all_plans", "all_windows_of_plan"]
 
 
@@ -254,12 +254,21 @@ class LinearTerm:
         return cls(AtomRef.from_obj(obj["atom"]), _num(obj["coef"], "coef"))
 
 
-# 软约束的惩罚配置：违反 1 秒要罚多少钱（这里单位仍是目标函数里的“秒”）。
-# owner 决定这笔账记到 composite 还是 intersection_loss。
+# 软约束的惩罚/奖励配置。
+# owner 决定这笔账记到哪里：
+#   band_loss          -> 带目标的损失（从 composite 减掉）
+#   intersection_reward-> 路口回报（超额满足量）
+#   intersection_loss  -> 路口损失（违反量）
 @dataclass(frozen=True)
 class SoftPenalty:
     coef: float
     owner: Owner
+
+    def __post_init__(self) -> None:
+        if self.owner not in ("band_loss", "intersection_reward", "intersection_loss"):
+            raise ValueError(f"unknown soft constraint owner {self.owner!r}")
+        if self.coef <= 0.0:
+            raise ValueError("soft constraint coef must be > 0")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "SoftPenalty":
@@ -1051,21 +1060,32 @@ class ParetoConfig:
                    int(obj.get("topk_grids", 1)))
 
 
-# 一个聚合贡献项：把聚合值按权重计入 band objective（composite）或路口损失。
-# 符号由 op 与 target 自动决定，用户只写正权重：
-#   target = band_objective   (composite 最大化)：min → +w·t，max → -w·t
-#   target = intersection_loss (L 最小化)：      min → -w·t，max → +w·t
-# 四种组合都精确（都把 t 推向其包络的正确方向）。
+# 一个聚合贡献项：把聚合值 t 显式按符号计入某个目标/损失。
+# 不要求解器推断符号；target/sign/weight/direction 全部写在配置里，
+# 合法性由 AggregateSpec 校验：
+#   min 聚合（上包络，精确方向=最大化）：
+#       target=band_objective,      sign=+1, direction=maximize
+#       target=intersection_reward, sign=+1, direction=maximize
+#   max 聚合（下包络，精确方向=最小化）：
+#       target=band_objective,      sign=-1, direction=minimize
+#       target=intersection_loss,   sign=+1, direction=minimize
 @dataclass(frozen=True)
 class AggregateContributionSpec:
-    target: Literal["band_objective", "intersection_loss"]
-    weight: float = 1.0
+    target: Literal["band_objective", "intersection_reward", "intersection_loss"]
+    sign: int
+    weight: float
+    direction: Literal["maximize", "minimize"]
 
     def __post_init__(self) -> None:
-        if self.target not in ("band_objective", "intersection_loss"):
+        if self.target not in ("band_objective", "intersection_reward", "intersection_loss"):
             raise ValueError(f"unknown aggregate contribution target {self.target!r}")
+        if self.sign not in (-1, 1):
+            raise ValueError(f"aggregate contribution sign must be +1 or -1, got {self.sign!r}")
         if self.weight <= 0.0:
             raise ValueError("aggregate contribution weight must be > 0")
+        if self.direction not in ("maximize", "minimize"):
+            raise ValueError(
+                f"aggregate contribution direction must be maximize/minimize, got {self.direction!r}")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "AggregateContributionSpec":
@@ -1073,11 +1093,19 @@ class AggregateContributionSpec:
             return obj
         if not isinstance(obj, Mapping):
             raise ValueError(f"aggregate contribution must be an object, got {obj!r}")
+        missing = [k for k in ("target", "sign", "direction") if k not in obj]
+        if missing:
+            raise ValueError(
+                "aggregate contribution requires explicit "
+                f"target/sign/direction (missing {missing}); legacy auto-sign is not supported")
         return cls(target=str(obj["target"]),
-                   weight=_num(obj.get("weight", 1.0), "weight"))
+                   sign=int(obj["sign"]),
+                   weight=_num(obj.get("weight", 1.0), "weight"),
+                   direction=str(obj["direction"]))
 
     def to_obj(self) -> dict[str, Any]:
-        return {"target": self.target, "weight": self.weight}
+        return {"target": self.target, "sign": self.sign,
+                "weight": self.weight, "direction": self.direction}
 
 
 # 一个具名聚合：对一组线性表达式取 max/min，得到一个标量值 t，
@@ -1104,6 +1132,20 @@ class AggregateSpec:
                     raise ValueError(
                         f"aggregate {self.id!r} only supports boundary/const atoms, "
                         f"got {t.atom.kind!r}")
+        for c in self.contributions:
+            if c.target == "band_objective":
+                legal = ((self.op == "min" and c.sign == 1 and c.direction == "maximize")
+                         or (self.op == "max" and c.sign == -1 and c.direction == "minimize"))
+            elif c.target == "intersection_reward":
+                legal = (self.op == "min" and c.sign == 1 and c.direction == "maximize")
+            else:  # intersection_loss
+                legal = (self.op == "max" and c.sign == 1 and c.direction == "minimize")
+            if not legal:
+                raise ValueError(
+                    f"aggregate {self.id!r} contribution {c.to_obj()} is not exact for op={self.op!r}; "
+                    "legal combinations: min+band_objective(+1,maximize), "
+                    "min+intersection_reward(+1,maximize), "
+                    "max+band_objective(-1,minimize), max+intersection_loss(+1,minimize)")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "AggregateSpec":

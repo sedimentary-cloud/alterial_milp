@@ -25,12 +25,15 @@ from ..report.solution import SolutionDecoder, SolutionRecord
 from ..solve.backend_base import SolveOptions, SolveStatus
 
 
-# 一个 Pareto 点：ε、实际 composite、路口损失、完整方案。
+# 一个 Pareto 点：ε、带分数、路口 R/L/分数/成本、完整方案。
 @dataclass(frozen=True)
 class ParetoPoint:
     epsilon_s: float
     composite_actual_s: float
+    intersection_reward_s: float
     intersection_loss_s: float
+    intersection_composite_s: float
+    intersection_cost_s: float
     solution: SolutionRecord
 
 
@@ -68,13 +71,14 @@ class EpsilonConstraintScanner:
             time_limit_s=self.problem.solver.time_limit_s,
             mip_rel_gap=self.problem.solver.mip_rel_gap,
         )
-        loss_tol = 1e-6 * max(1.0, abs(Bstar))
+        cost_tol = 1e-6 * max(1.0, abs(Bstar))
 
         for l in range(self.cfg.num_points + 1):
             eps = (l / max(1, self.cfg.num_points)) * self.cfg.relax_max * relax_mag
             session = self.backend.create(model)
-            # 字典序第一阶段：在 composite 允许下降 eps 的前提下，最小化 loss。
-            self.backend.set_objective(session, model.expr_loss(), "min")
+            # 字典序第一阶段：在 composite 允许下降 eps 的前提下，最小化路口净成本
+            # C = L_int − R_int（等价于最大化路口分数）。
+            self.backend.set_objective(session, model.expr_intersection_cost(), "min")
             self.backend.add_constraint(
                 session, model.expr_composite(), ">=", Bstar - eps - num_slack,
                 ConstraintMeta("EPS", f"composite >= B*-epsilon l={l}", {"epsilon": str(eps)}),
@@ -84,12 +88,13 @@ class EpsilonConstraintScanner:
                 continue
             sol1 = decoder.decode(res1.values)
 
-            # 字典序第二阶段：固定 loss 最优值，最大化 composite。
-            # 这样同一个 loss 水平下不会返回一个被支配的较低 composite 点。
+            # 字典序第二阶段：固定路口净成本最优值，最大化 composite。
             self.backend.set_objective(session, model.expr_composite(), "max")
             self.backend.add_constraint(
-                session, model.expr_loss(), "<=", float(sol1.loss_s) + loss_tol,
-                ConstraintMeta("LEX", f"loss <= L*+tol l={l}", {"epsilon": str(eps)}),
+                session, model.expr_intersection_cost(), "<=",
+                float(sol1.intersection_cost_s) + cost_tol,
+                ConstraintMeta("LEX", f"intersection cost <= C*+tol l={l}",
+                               {"epsilon": str(eps)}),
             )
             res2 = self.backend.solve(session, solve_options)
             if (res2.values is not None
@@ -98,8 +103,15 @@ class EpsilonConstraintScanner:
             else:
                 # 第二阶段失败时回退到第一阶段可行点，至少保留一个已求出的点。
                 sol = sol1
-            points.append(ParetoPoint(float(eps), float(sol.composite_s),
-                                      float(sol.loss_s), sol))
+            points.append(ParetoPoint(
+                epsilon_s=float(eps),
+                composite_actual_s=float(sol.composite_s),
+                intersection_reward_s=float(sol.intersection_reward_s),
+                intersection_loss_s=float(sol.intersection_loss_s),
+                intersection_composite_s=float(sol.intersection_composite_s),
+                intersection_cost_s=float(sol.intersection_cost_s),
+                solution=sol,
+            ))
         return ParetoFront(points, base_grid=base)
 
 

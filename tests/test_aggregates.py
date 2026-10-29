@@ -120,7 +120,7 @@ class TestAggregateSchema(unittest.TestCase):
         plans = [_plan("I1_P1", "I1", [0.2, 0.6], [True, True, False]),
                  _plan("I2_P1", "I2", [0.5], [True, False])]
         agg = _phase_min_agg((0, 1), plan="I1_P1",
-                             contributions=[{"target": "band_objective", "weight": 2.0}])
+                             contributions=[{"target": "band_objective", "sign": 1, "weight": 2.0, "direction": "maximize"}])
         raw = _problem(plans, [agg])
         p = ProblemInput.from_obj(raw)
         self.assertEqual(p.aggregates[0].op, "min")
@@ -142,7 +142,7 @@ class TestAggregateSchema(unittest.TestCase):
                 "id": "bad", "op": "min", "plan": "I1_P1",
                 "expressions": [[{"atom": {"kind": "bandwidth", "demand": "GW_up"},
                                   "coef": 1.0}]],
-                "contributions": [{"target": "band_objective", "weight": 1.0}],
+                "contributions": [{"target": "band_objective", "sign": 1, "weight": 1.0, "direction": "maximize"}],
             })
 
     def test_validation_errors(self):
@@ -151,10 +151,10 @@ class TestAggregateSchema(unittest.TestCase):
         cases = []
         # 未知 plan
         cases.append(_phase_min_agg((0, 1), plan="NOPE",
-                                    contributions=[{"target": "band_objective", "weight": 1.0}]))
+                                    contributions=[{"target": "band_objective", "sign": 1, "weight": 1.0, "direction": "maximize"}]))
         # boundary 下标越界
         bad = _phase_min_agg((0, 1), plan="I1_P1",
-                             contributions=[{"target": "band_objective", "weight": 1.0}])
+                             contributions=[{"target": "band_objective", "sign": 1, "weight": 1.0, "direction": "maximize"}])
         bad["expressions"][0][0]["atom"]["index"] = 9
         cases.append(bad)
         for agg in cases:
@@ -168,7 +168,7 @@ class TestAggregateMilp(unittest.TestCase):
         plans = [_plan("I1_P1", "I1", [0.2, 0.6], [True, True, False]),
                  _plan("I2_P1", "I2", [0.5], [True, False])]
         agg = _phase_min_agg((0, 1), plan="I1_P1",
-                             contributions=[{"target": "band_objective", "weight": 2.0}])
+                             contributions=[{"target": "band_objective", "sign": 1, "weight": 2.0, "direction": "maximize"}])
         out = run(_problem(plans, [agg]))
         grid = out["grid_results"][0]
         sol = out["pareto"]["points"][0]["solution"]
@@ -179,8 +179,8 @@ class TestAggregateMilp(unittest.TestCase):
         self.assertAlmostEqual(grid["composite_best"], 81.0, places=3)
         self.assertAlmostEqual(out["pareto"]["points"][0]["composite_actual"], 81.0, places=3)
 
-    def test_min_aggregate_offsets_intersection_loss(self):
-        # 可调边界 → 聚合不是常数，验证 L 最小化把 t 推到 min(相位)。
+    def test_min_aggregate_reward_offsets_intersection_loss(self):
+        # 可调边界 → 聚合不是常数，验证路口分数 R−L 把 t 推到 min(相位)。
         soft = [{"id": "b0_cap",
                  "terms": [{"atom": {"kind": "boundary", "intersection": "I1",
                                      "plan": "I1_P1", "direction": "up", "index": 0},
@@ -196,15 +196,21 @@ class TestAggregateMilp(unittest.TestCase):
                       for d in ("up", "down")},
                   "hard_constraints": [], "soft_constraints": soft},
                  _plan("I2_P1", "I2", [0.5], [True, False])]
-        agg = _phase_min_agg((0, 1), plan="I1_P1",
-                             contributions=[{"target": "intersection_loss", "weight": 1.0}])
+        contribution = {"target": "intersection_reward", "sign": 1,
+                        "weight": 1.0, "direction": "maximize"}
+        agg = _phase_min_agg((0, 1), plan="I1_P1", contributions=[contribution])
         problem = ProblemInput.from_obj(_problem(plans, [agg]))
         model, _, sol, objective = _solve_min_loss(problem)
-        # 解码的净损失 = 模型 expr_loss 的最优值，且 = raw − min(相位)。
+        # 模型最小化 net cost = L − R；解码值与目标一致，且 R = min(相位)。
         self.assertAlmostEqual(objective, sol.loss_s, places=4)
-        self.assertAlmostEqual(sol.loss_s, sol.raw_loss_s - sol.aggregates["min_phase"],
+        self.assertAlmostEqual(sol.intersection_reward_s, sol.aggregates["min_phase"],
                                places=4)
-        self.assertLessEqual(sol.loss_s, sol.raw_loss_s + 1e-9)
+        self.assertAlmostEqual(sol.intersection_loss_s, sol.raw_loss_s, places=4)
+        self.assertAlmostEqual(sol.intersection_composite_s,
+                               sol.intersection_reward_s - sol.intersection_loss_s,
+                               places=4)
+        self.assertAlmostEqual(sol.intersection_cost_s, -sol.intersection_composite_s,
+                               places=4)
 
     def test_multi_plan_gating(self):
         plans = [_plan("I1_A", "I1", [0.2], [True, False]),
@@ -212,7 +218,7 @@ class TestAggregateMilp(unittest.TestCase):
                  _plan("I2_P1", "I2", [0.5], [True, False])]
         # A 的窗口只有 18s，B 有 54s → B 被选中；A 的聚合应为 0。
         agg = _phase_min_agg((0, 0), plan="I1_A",
-                             contributions=[{"target": "band_objective", "weight": 3.0}])
+                             contributions=[{"target": "band_objective", "sign": 1, "weight": 3.0, "direction": "maximize"}])
         out = run(_problem(plans, [agg]))
         sol = out["pareto"]["points"][0]["solution"]
         self.assertEqual(sol["plan_selection"]["I1"], "I1_B")
@@ -225,7 +231,7 @@ class TestAggregateMilp(unittest.TestCase):
                  _plan("I1_B", "I1", [0.6], [True, False]),
                  _plan("I2_P1", "I2", [0.5], [True, False])]
         agg = _phase_min_agg((0, 0), plan="I1_A",
-                             contributions=[{"target": "band_objective", "weight": 3.0}])
+                             contributions=[{"target": "band_objective", "sign": 1, "weight": 3.0, "direction": "maximize"}])
         out = run(_problem(plans, [agg]))
         self.assertEqual(out["grid_results"][0]["status"], "optimal")
         sol = out["pareto"]["points"][0]["solution"]
@@ -245,7 +251,7 @@ class TestAggregateMilp(unittest.TestCase):
                  {"atom": {"kind": "boundary", "intersection": "I1", "plan": "I1_P1",
                            "direction": "up", "index": 0}, "coef": -1.0}],
             ],
-            "contributions": [{"target": "band_objective", "weight": 1.0}],
+            "contributions": [{"target": "band_objective", "sign": 1, "weight": 1.0, "direction": "maximize"}],
         }
         out = run(_problem(plans, [agg]))
         sol = out["pareto"]["points"][0]["solution"]
@@ -283,7 +289,7 @@ class TestAggregateMilp(unittest.TestCase):
         plans = [_plan("I1_P1", "I1", [0.2, 0.6], [True, True, False]),
                  _plan("I2_P1", "I2", [0.5], [True, False])]
         agg = _phase_min_agg((0, 1), plan="I1_P1",
-                             contributions=[{"target": "band_objective", "weight": 2.0}])
+                             contributions=[{"target": "band_objective", "sign": 1, "weight": 2.0, "direction": "maximize"}])
         raw = _problem(plans, [agg])
         raw["solver"]["multistage"] = {"enabled": True, "fallback_to_full_milp": True}
         out = run(raw)
@@ -304,7 +310,8 @@ class TestAggregateMilp(unittest.TestCase):
                  {"atom": {"kind": "boundary", "intersection": "I1", "plan": "I1_P1",
                            "direction": "up", "index": 0}, "coef": -1.0}],
             ],
-            "contributions": [{"target": "intersection_loss", "weight": 1.0}],
+            "contributions": [{"target": "intersection_reward", "sign": 1,
+                               "weight": 1.0, "direction": "maximize"}],
         }
         problem = ProblemInput.from_obj(_three_node_problem([agg]))
         ctx = FeasibilityFilter(problem).filter(CYCLE, 1.0)
@@ -313,14 +320,14 @@ class TestAggregateMilp(unittest.TestCase):
         self.assertIsNotNone(ms.solution)
         self.assertIn("语义分解", ms.stage1_paths)
         self.assertAlmostEqual(ms.solution.aggregates["min_phase"], 18.0, places=3)
-        self.assertAlmostEqual(ms.solution.aggregate_loss_s, -18.0, places=3)
-        self.assertAlmostEqual(ms.solution.loss_s, -18.0, places=3)
+        self.assertAlmostEqual(ms.solution.intersection_reward_s, 18.0, places=3)
+        self.assertAlmostEqual(ms.solution.intersection_cost_s, -18.0, places=3)
 
     def test_greedy_runs_with_aggregates(self):
         plans = [_plan("I1_P1", "I1", [0.2, 0.6], [True, True, False]),
                  _plan("I2_P1", "I2", [0.5], [True, False])]
         agg = _phase_min_agg((0, 1), plan="I1_P1",
-                             contributions=[{"target": "band_objective", "weight": 2.0}])
+                             contributions=[{"target": "band_objective", "sign": 1, "weight": 2.0, "direction": "maximize"}])
         raw = _problem(plans, [agg])
         raw["solver"]["heuristic"]["enabled"] = True
         raw["solver"]["heuristic"]["refine_rounds"] = 1
@@ -332,3 +339,118 @@ class TestAggregateMilp(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIntersectionScore(unittest.TestCase):
+    def test_plan_reward_and_loss_scores(self):
+        soft_r = [{"id": "b0_reward",
+                   "terms": [{"atom": {"kind": "boundary", "intersection": "I1",
+                                       "plan": "I1_P1", "direction": "up", "index": 0},
+                              "coef": 1.0}],
+                   "sense": ">=", "rhs_ratio": 0.1, "hard": False,
+                   "soft": {"coef": 1.0, "owner": "intersection_reward"}}]
+        soft_l = [{"id": "b0_loss",
+                   "terms": [{"atom": {"kind": "boundary", "intersection": "I2",
+                                       "plan": "I2_P1", "direction": "up", "index": 0},
+                              "coef": 1.0}],
+                   "sense": "<=", "rhs_ratio": 0.3, "hard": False,
+                   "soft": {"coef": 1.0, "owner": "intersection_loss"}}]
+        plans = [_plan("I1_P1", "I1", [0.2], [True, False], soft=soft_r),
+                 _plan("I2_P1", "I2", [0.5], [True, False], soft=soft_l)]
+        out = run(_problem(plans, []))
+        sol = out["pareto"]["points"][0]["solution"]
+        # I1 b0=18 → reward 18−9=9；I2 b0=45 → loss 45−27=18。
+        self.assertAlmostEqual(sol["intersection_reward_s"], 9.0, places=4)
+        self.assertAlmostEqual(sol["intersection_loss_s"], 18.0, places=4)
+        self.assertAlmostEqual(sol["intersection_composite_s"], -9.0, places=4)
+        self.assertAlmostEqual(sol["intersection_cost_s"], 9.0, places=4)
+        self.assertAlmostEqual(sol["loss_s"], 9.0, places=4)
+        point = out["pareto"]["points"][0]
+        self.assertAlmostEqual(point["intersection_composite"], -9.0, places=4)
+        self.assertAlmostEqual(point["intersection_cost"], 9.0, places=4)
+
+    def test_reward_gated_by_plan_selection(self):
+        soft_a = [{"id": "a_reward",
+                   "terms": [{"atom": {"kind": "boundary", "intersection": "I1",
+                                       "plan": "I1_A", "direction": "up", "index": 0},
+                              "coef": 1.0}],
+                   "sense": ">=", "rhs_ratio": 0.1, "hard": False,
+                   "soft": {"coef": 1.0, "owner": "intersection_reward"}}]
+        plans = [_plan("I1_A", "I1", [0.2], [True, False], soft=soft_a),
+                 _plan("I1_B", "I1", [0.6], [True, False]),
+                 _plan("I2_P1", "I2", [0.5], [True, False])]
+        out = run(_problem(plans, []))
+        sol = out["pareto"]["points"][0]["solution"]
+        self.assertEqual(sol["plan_selection"]["I1"], "I1_B")
+        self.assertAlmostEqual(sol["intersection_reward_s"], 0.0, places=6)
+        self.assertAlmostEqual(sol["intersection_composite_s"], 0.0, places=6)
+
+    def test_global_reward_constraint(self):
+        plan_i1 = _plan("I1_P1", "I1", [0.2], [True, False])
+        plan_i2 = _plan("I2_P1", "I2", [0.5], [True, False])
+        raw = _problem([plan_i1, plan_i2], [])
+        raw["global_constraints"] = [{
+            "id": "bw_reward",
+            "terms": [{"atom": {"kind": "bandwidth", "demand": "GW_up"}, "coef": 1.0}],
+            "sense": ">=", "rhs_s": 0.0, "hard": False,
+            "soft": {"coef": 1.0, "owner": "intersection_reward"},
+        }]
+        out = run(raw)
+        sol = out["pareto"]["points"][0]["solution"]
+        self.assertAlmostEqual(sol["intersection_reward_s"], sol["band_reward_s"], places=4)
+
+    def test_reward_owner_validation(self):
+        from greenwave.schema.models import SoftPenalty
+        with self.assertRaisesRegex(ValueError, "owner"):
+            SoftPenalty.from_obj({"coef": 1.0, "owner": "composite"})
+        # equality reward 校验报 V6
+        soft = [{"id": "eq_reward",
+                 "terms": [{"atom": {"kind": "boundary", "intersection": "I1",
+                                     "plan": "I1_P1", "direction": "up", "index": 0},
+                            "coef": 1.0}],
+                 "sense": "==", "rhs_s": 10.0, "hard": False,
+                 "soft": {"coef": 1.0, "owner": "intersection_reward"}}]
+        p = ProblemInput.from_obj(_problem(
+            [_plan("I1_P1", "I1", [0.2], [True, False], soft=soft),
+             _plan("I2_P1", "I2", [0.5], [True, False])], []))
+        self.assertIn("V6", [i.code for i in p.validate_all()])
+
+    def test_aggregate_contribution_legality(self):
+        from greenwave.schema.models import AggregateSpec
+
+        def agg(op, contribution):
+            return {
+                "id": "x", "op": op, "plan": "I1_P1",
+                "expressions": [[{"atom": {"kind": "const", "const": 1.0}, "coef": 1.0}]],
+                "contributions": [contribution],
+            }
+
+        legal = [
+            ("min", {"target": "band_objective", "sign": 1, "weight": 1.0,
+                     "direction": "maximize"}),
+            ("min", {"target": "intersection_reward", "sign": 1, "weight": 1.0,
+                     "direction": "maximize"}),
+            ("max", {"target": "band_objective", "sign": -1, "weight": 1.0,
+                     "direction": "minimize"}),
+            ("max", {"target": "intersection_loss", "sign": 1, "weight": 1.0,
+                     "direction": "minimize"}),
+        ]
+        for op, c in legal:
+            self.assertEqual(AggregateSpec.from_obj(agg(op, c)).op, op)
+        illegal = [
+            ("max", {"target": "intersection_loss", "sign": 1, "weight": 1.0,
+                     "direction": "maximize"}),
+            ("min", {"target": "intersection_loss", "sign": 1, "weight": 1.0,
+                     "direction": "minimize"}),
+            ("max", {"target": "band_objective", "sign": 1, "weight": 1.0,
+                     "direction": "minimize"}),
+            ("min", {"target": "intersection_reward", "sign": -1, "weight": 1.0,
+                     "direction": "maximize"}),
+        ]
+        for op, c in illegal:
+            with self.assertRaises(ValueError):
+                AggregateSpec.from_obj(agg(op, c))
+        with self.assertRaisesRegex(ValueError, "sign"):
+            AggregateSpec.from_obj(agg("min", {"target": "band_objective",
+                                               "weight": 1.0,
+                                               "direction": "maximize"}))

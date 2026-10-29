@@ -48,6 +48,8 @@ class GridPointResult:
     band_reward_s: float | None = None
     margin_loss_s: float | None = None
     intersection_loss_s: float | None = None
+    intersection_reward_s: float | None = None
+    intersection_composite_s: float | None = None
     green_edge_loss_s: float | None = None
 
 
@@ -115,6 +117,8 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
             band_reward_s=fallback.band_reward_s,
             margin_loss_s=fallback.margin_loss_s,
             intersection_loss_s=fallback.intersection_loss_s,
+            intersection_reward_s=fallback.intersection_reward_s,
+            intersection_composite_s=fallback.intersection_composite_s,
             green_edge_loss_s=fallback.green_edge_loss_s,
         )
 
@@ -136,6 +140,8 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
             band_reward_s=fallback.band_reward_s,
             margin_loss_s=fallback.margin_loss_s,
             intersection_loss_s=fallback.intersection_loss_s,
+            intersection_reward_s=fallback.intersection_reward_s,
+            intersection_composite_s=fallback.intersection_composite_s,
             green_edge_loss_s=fallback.green_edge_loss_s,
         )
     solution = ms.solution
@@ -152,7 +158,9 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
         ctx=ctx,
         band_reward_s=None if solution is None else solution.band_reward_s,
         margin_loss_s=None if solution is None else solution.margin_loss_s,
-        intersection_loss_s=None if solution is None else solution.loss_s,
+        intersection_loss_s=None if solution is None else solution.intersection_loss_s,
+        intersection_reward_s=None if solution is None else solution.intersection_reward_s,
+        intersection_composite_s=None if solution is None else solution.intersection_composite_s,
         green_edge_loss_s=None if solution is None else solution.green_edge_loss_s,
     )
 
@@ -195,7 +203,9 @@ def _solve_stage1_full_milp(problem: ProblemInput, ctx: GridPointContext,
         ctx=ctx,
         band_reward_s=None if solution is None else solution.band_reward_s,
         margin_loss_s=None if solution is None else solution.margin_loss_s,
-        intersection_loss_s=None if solution is None else solution.loss_s,
+        intersection_loss_s=None if solution is None else solution.intersection_loss_s,
+        intersection_reward_s=None if solution is None else solution.intersection_reward_s,
+        intersection_composite_s=None if solution is None else solution.intersection_composite_s,
         green_edge_loss_s=None if solution is None else solution.green_edge_loss_s,
     )
 

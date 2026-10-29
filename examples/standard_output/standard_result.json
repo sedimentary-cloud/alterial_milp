@@ -327,13 +327,13 @@
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,1,1]",
               "violation_s": 2.743589743589837,
               "cost": 0.5487179487179674,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 32.97069597069583,
               "cost": 6.594139194139166,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},
@@ -662,13 +662,13 @@
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,2,2]",
               "violation_s": 2.743589743589837,
               "cost": 0.5487179487179674,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 9.637362637362571,
               "cost": 1.9274725274725144,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},
@@ -939,19 +939,19 @@
               "id": "red_boundary_start:RW_down_6_5:red_edge_start[RW_down_6_5,1,1]",
               "violation_s": 0.9912804267755932,
               "cost": 0.19825608535511866,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,2,2]",
               "violation_s": 14.743589743589865,
               "cost": 2.9487179487179733,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 11.637362637362557,
               "cost": 2.3274725274725117,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},
@@ -1232,19 +1232,19 @@
               "id": "red_boundary_start:RW_down_6_5:red_edge_start[RW_down_6_5,1,1]",
               "violation_s": 4.942577030794863,
               "cost": 0.9885154061589726,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,2,2]",
               "violation_s": 14.743589743595209,
               "cost": 2.948717948719042,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 11.637362637357231,
               "cost": 2.3274725274714463,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},
@@ -1509,19 +1509,19 @@
               "id": "red_boundary_start:RW_down_6_5:red_edge_start[RW_down_6_5,1,1]",
               "violation_s": 4.942577030812117,
               "cost": 0.9885154061624235,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,2,2]",
               "violation_s": 16.743589743589748,
               "cost": 3.3487179487179497,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 9.63736263736254,
               "cost": 1.927472527472508,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},
@@ -1786,19 +1786,19 @@
               "id": "red_boundary_start:RW_down_6_5:red_edge_start[RW_down_6_5,1,1]",
               "violation_s": 18.154918384292415,
               "cost": 3.630983676858483,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,1,1]",
               "violation_s": 14.743589743588643,
               "cost": 2.9487179487177286,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 34.970695970695886,
               "cost": 6.994139194139177,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},
@@ -2063,19 +2063,19 @@
               "id": "red_boundary_start:RW_down_6_5:red_edge_start[RW_down_6_5,1,1]",
               "violation_s": 18.15491838429233,
               "cost": 3.6309836768584662,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,1,1]",
               "violation_s": 14.743589743589727,
               "cost": 2.9487179487179453,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 34.97069597069629,
               "cost": 6.994139194139258,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},
@@ -2372,19 +2372,19 @@
               "id": "red_boundary_start:RW_down_6_5:red_edge_start[RW_down_6_5,1,1]",
               "violation_s": 18.154918384292458,
               "cost": 3.6309836768584915,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,1,1]",
               "violation_s": 16.743589743590313,
               "cost": 3.348717948718063,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 32.97069597069593,
               "cost": 6.594139194139186,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},
@@ -2649,19 +2649,19 @@
               "id": "red_boundary_start:RW_down_6_5:red_edge_start[RW_down_6_5,1,1]",
               "violation_s": 18.154918384292472,
               "cost": 3.6309836768584947,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_3_2:red_edge_start[RW_down_3_2,1,1]",
               "violation_s": 14.74358974358894,
               "cost": 2.948717948717788,
-              "owner": "composite"
+              "owner": "band_loss"
             },
             {
               "id": "red_boundary_start:RW_down_2_1:red_edge_start[RW_down_2_1,1,1]",
               "violation_s": 34.97069597069593,
               "cost": 6.994139194139186,
-              "owner": "composite"
+              "owner": "band_loss"
             }
           ],
           "balanced_groups": {},

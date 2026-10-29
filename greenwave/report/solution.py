@@ -52,19 +52,27 @@ class SolutionRecord:
     # 下面三个字段用于格点热力图：
     # band_reward_s：Σ weight_b · Β_b，只含正带宽收益；
     # margin_loss_s：绿波 margin 短缺罚的正值；
-    # loss_s 是净路口损失（raw + aggregate_loss），聚合奖励可能让它为负。
+    # loss_s 是路口净成本 L_int − R_int，路口回报可能让它为负。
     band_reward_s: float = 0.0
     margin_loss_s: float = 0.0
     # 绿波边界亲和损失（贴合损失）：带端离绿窗对应端点超出 free_s 的部分 × coef。
     green_edge_loss_s: float = 0.0
-    # 具名聚合：真实值（选中方案时的 max/min），以及它对两个目标的贡献。
-    #   raw_loss_s      = 不含聚合项的路口损失（软约束违反量之和，≥0）
-    #   aggregate_loss_s= 聚合项对 L 的贡献（可正可负）
-    #   loss_s          = raw_loss_s + aggregate_loss_s（Pareto 阶段 2 最小化的值）
+    # 路口分数：R_int − L_int；Pareto 阶段 2 最小化净成本 loss_s = L_int − R_int。
+    #   raw_loss_s       = 软约束违反量（owner=intersection_loss）之和，不含聚合
+    #   soft_reward_s    = 软约束超额满足量（owner=intersection_reward）之和
+    #   aggregate_loss_s = 聚合对 L 的贡献（可负）
+    #   aggregate_reward_s = 聚合对 R 的贡献
+    #   loss_s           = (raw_loss_s + aggregate_loss_s) − (soft_reward_s + aggregate_reward_s)
     aggregates: Mapping[str, float] = field(default_factory=dict)
     raw_loss_s: float = 0.0
     aggregate_loss_s: float = 0.0
     aggregate_band_reward_s: float = 0.0
+    soft_reward_s: float = 0.0
+    aggregate_reward_s: float = 0.0
+    intersection_reward_s: float = 0.0
+    intersection_loss_s: float = 0.0
+    intersection_composite_s: float = 0.0
+    intersection_cost_s: float = 0.0
 
 
 def _violation(ref: SoftPenaltyRef, values: np.ndarray) -> float:
@@ -74,6 +82,16 @@ def _violation(ref: SoftPenaltyRef, values: np.ndarray) -> float:
     if ref.sense == ">=":
         return max(0.0, ref.rhs - lhs)
     return abs(lhs - ref.rhs)
+
+
+def _reward(ref, values: np.ndarray) -> float:
+    """软约束的超额满足量（owner=intersection_reward）。"""
+    lhs = ref.expr.evaluate(values)
+    if ref.sense == "<=":
+        return max(0.0, ref.rhs - lhs)
+    if ref.sense == ">=":
+        return max(0.0, lhs - ref.rhs)
+    return 0.0
 
 
 # 解解码器：只依赖模型访问器 + 元数据，不直接碰求解器对象。
@@ -201,7 +219,8 @@ class SolutionDecoder:
         # 因为它可能大于真实违反量。
         violations: list[ViolationRecord] = []
         composite_soft = 0.0
-        loss = 0.0
+        soft_loss = 0.0
+        soft_reward = 0.0
         for ref in meta.soft:
             # Soft constraints belonging to a plan are active only when that
             # plan is selected.  Decoding them unconditionally can report a
@@ -213,10 +232,16 @@ class SolutionDecoder:
             viol = _violation(ref, values)
             cost = ref.coef * viol
             violations.append(ViolationRecord(ref.constraint_id, float(viol), float(cost), ref.owner))
-            if ref.owner == "composite":
+            if ref.owner == "band_loss":
                 composite_soft += cost
             else:
-                loss += cost
+                soft_loss += cost
+        for ref in meta.rewards:
+            if ref.plan_id is not None:
+                plan_obj = meta.problem.plan(ref.plan_id)
+                if selection.get(plan_obj.intersection) != ref.plan_id:
+                    continue
+            soft_reward += ref.coef * _reward(ref, values)
         reward = 0.0
         for band in bands:
             for b in meta.problem.objective.band_demands:
@@ -239,7 +264,7 @@ class SolutionDecoder:
                     red_boundary_pen += cost
                     violations.append(ViolationRecord(
                         f"red_boundary_{side}:{ref.demand_id}:{self.model.vars.names[h.index]}",
-                        float(val), float(cost), "composite"))
+                        float(val), float(cost), "band_loss"))
 
         # 均衡组：实际 z 值 + min_existing 软约束的短缺罚。
         balanced_values: dict[str, float] = {}
@@ -258,6 +283,7 @@ class SolutionDecoder:
         aggregate_values: dict[str, float] = {}
         aggregate_band_reward = 0.0
         aggregate_loss = 0.0
+        aggregate_reward = 0.0
         for agg_id, am in meta.aggregates.items():
             active = True
             if am.spec.plan is not None and am.available:
@@ -272,24 +298,32 @@ class SolutionDecoder:
             aggregate_values[agg_id] = float(value)
             for c in am.spec.contributions:
                 if c.target == "band_objective":
-                    sign = 1.0 if am.spec.op == "min" else -1.0
-                    aggregate_band_reward += sign * c.weight * value
+                    aggregate_band_reward += c.sign * c.weight * value
+                elif c.target == "intersection_reward":
+                    aggregate_reward += c.sign * c.weight * value
                 else:
-                    sign = -1.0 if am.spec.op == "min" else 1.0
-                    aggregate_loss += sign * c.weight * value
+                    aggregate_loss += c.sign * c.weight * value
 
-        raw_loss = loss
-        loss = raw_loss + aggregate_loss
+        intersection_reward = soft_reward + aggregate_reward
+        intersection_loss = soft_loss + aggregate_loss
+        intersection_composite = intersection_reward - intersection_loss
+        intersection_cost = -intersection_composite
         composite = (reward - margin_pen - green_edge_pen - composite_soft
                      + balanced_reward - red_boundary_pen + aggregate_band_reward)
         return SolutionRecord(dict(selection), offsets, adjustments, tuple(bands),
-                              tuple(violations), float(composite), float(loss),
+                              tuple(violations), float(composite), float(intersection_cost),
                               balanced_values, boundaries_r, derived_windows,
                               float(reward), float(margin_pen), float(green_edge_pen),
                               aggregates=aggregate_values,
-                              raw_loss_s=float(raw_loss),
+                              raw_loss_s=float(soft_loss),
                               aggregate_loss_s=float(aggregate_loss),
-                              aggregate_band_reward_s=float(aggregate_band_reward))
+                              aggregate_band_reward_s=float(aggregate_band_reward),
+                              soft_reward_s=float(soft_reward),
+                              aggregate_reward_s=float(aggregate_reward),
+                              intersection_reward_s=float(intersection_reward),
+                              intersection_loss_s=float(intersection_loss),
+                              intersection_composite_s=float(intersection_composite),
+                              intersection_cost_s=float(intersection_cost))
 
     # ------------------------------------------------------------------
     def _actual_green_penalties(self, values: np.ndarray, bands, selection) -> tuple[float, float]:
@@ -366,6 +400,11 @@ class ReportBuilder:
                 "negative_green_edge_loss_s": (
                     None if r.green_edge_loss_s is None else -r.green_edge_loss_s),
                 "negative_intersection_loss_s": None if r.intersection_loss_s is None else -r.intersection_loss_s,
+                "intersection_reward_s": r.intersection_reward_s,
+                "intersection_loss_s": r.intersection_loss_s,
+                "intersection_composite_s": r.intersection_composite_s,
+                "intersection_cost_s": (
+                    None if r.intersection_composite_s is None else -r.intersection_composite_s),
                 # 归一化版本：除以周期 C，单位变成“周期比例”，可跨周期比较。
                 "bandwidth_objective_ratio": (
                     None if r.band_reward_s is None or r.cycle_s <= 0 else r.band_reward_s / r.cycle_s),
@@ -402,7 +441,10 @@ class ReportBuilder:
         return {
             "epsilon": p.epsilon_s,
             "composite_actual": p.composite_actual_s,
+            "intersection_reward": p.intersection_reward_s,
             "intersection_loss": p.intersection_loss_s,
+            "intersection_composite": p.intersection_composite_s,
+            "intersection_cost": p.intersection_cost_s,
             "solution": ReportBuilder._solution(sol),
         }
 
@@ -436,9 +478,15 @@ class ReportBuilder:
             "band_reward_s": sol.band_reward_s,
             "margin_loss_s": sol.margin_loss_s,
             "green_edge_loss_s": sol.green_edge_loss_s,
-            "intersection_loss_s": sol.loss_s,
+            "intersection_reward_s": sol.intersection_reward_s,
+            "intersection_loss_s": sol.intersection_loss_s,
+            "intersection_composite_s": sol.intersection_composite_s,
+            "intersection_cost_s": sol.intersection_cost_s,
+            "loss_s": sol.loss_s,
             "raw_intersection_loss_s": sol.raw_loss_s,
+            "soft_reward_s": sol.soft_reward_s,
             "aggregate_loss_s": sol.aggregate_loss_s,
+            "aggregate_reward_s": sol.aggregate_reward_s,
             "aggregate_band_reward_s": sol.aggregate_band_reward_s,
             "aggregates": {k: float(v) for k, v in sol.aggregates.items()},
         }

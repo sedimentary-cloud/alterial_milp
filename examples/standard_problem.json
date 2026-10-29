@@ -1201,7 +1201,7 @@
       "hard": false,
       "soft": {
         "coef": 1.0,
-        "owner": "composite"
+        "owner": "band_loss"
       }
     }
   ],

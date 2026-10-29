@@ -565,7 +565,7 @@ def _multi_plan_chain_problem(n_nodes: int = 4, n_plans: int = 2,
                 },
             }
             if soft_at == iid:
-                # owner=composite 的方案软约束：接口路口会被两个组共享，
+                # owner=band_loss 的方案软约束：接口路口会被两个组共享，
                 # 这类常数罚必须只计一次，DP 才能和整模同口径。
                 plan["soft_constraints"] = [{
                     "id": f"{iid}_up_soft", "terms": [{
@@ -573,7 +573,7 @@ def _multi_plan_chain_problem(n_nodes: int = 4, n_plans: int = 2,
                                  "plan": f"{iid}_P{c + 1}", "direction": "up",
                                  "index": 0}, "coef": 1.0}],
                     "sense": "<=", "rhs_ratio": 0.47, "hard": False,
-                    "soft": {"coef": 4.0, "owner": "composite"},
+                    "soft": {"coef": 4.0, "owner": "band_loss"},
                 }]
             plans.append(plan)
     demands = []
@@ -641,7 +641,7 @@ class TestPlanEnumerationDP(unittest.TestCase):
                                delta=1e-4)
 
     def test_interface_node_penalty_counted_once(self):
-        """接口路口带 owner=composite 的方案软约束时，DP 仍须与整模一致。"""
+        """接口路口带 owner=band_loss 的方案软约束时，DP 仍须与整模一致。"""
         raw = _multi_plan_chain_problem(n_nodes=4, n_plans=2, soft_at="I2")
         problem, ctx = self._ctx(raw)
         mono = solve_fixed_boundaries(problem, ctx, {}, decompose=False,

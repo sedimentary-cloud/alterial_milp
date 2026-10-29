@@ -370,7 +370,7 @@ class GreedyConstructor:
     # ------------------------------------------------------------------
     # evaluation / refinement
     # ------------------------------------------------------------------
-    def _soft_violation_plan(self, plan: PlanSpec, c: ConstraintSpec,
+    def _plan_constraint_lhs(self, plan: PlanSpec, c: ConstraintSpec,
                              witness: Mapping[tuple[Direction, int], float]) -> float:
         lhs = 0.0
         for t in c.terms:
@@ -395,15 +395,29 @@ class GreedyConstructor:
             else:
                 val = 0.0
             lhs += t.coef * val
-        rhs = c.rhs_for_cycle(self.C)
-        if c.sense == "<=":
-            viol = max(0.0, lhs - rhs)
-        elif c.sense == ">=":
-            viol = max(0.0, rhs - lhs)
-        else:
-            viol = abs(lhs - rhs)
+        return lhs
+
+    def _soft_violation_plan(self, plan: PlanSpec, c: ConstraintSpec,
+                             witness: Mapping[tuple[Direction, int], float]) -> float:
         coef = c.soft.coef if c.soft is not None else 0.0
-        return coef * viol
+        lhs = self._plan_constraint_lhs(plan, c, witness)
+        return coef * self._violation_from_lhs(lhs, c.sense, c.rhs_for_cycle(self.C))
+
+    @staticmethod
+    def _violation_from_lhs(lhs: float, sense: str, rhs: float) -> float:
+        if sense == "<=":
+            return max(0.0, lhs - rhs)
+        if sense == ">=":
+            return max(0.0, rhs - lhs)
+        return abs(lhs - rhs)
+
+    @staticmethod
+    def _reward_from_lhs(lhs: float, sense: str, rhs: float) -> float:
+        if sense == "<=":
+            return max(0.0, rhs - lhs)
+        if sense == ">=":
+            return max(0.0, lhs - rhs)
+        return 0.0
 
     def _band_margin_penalty(self, band: ConstructedBand, b: BandDemandSpec,
                              selection, offsets) -> float:
@@ -544,7 +558,8 @@ class GreedyConstructor:
                     reward += b.weight * band.width_s
         margin_pen = 0.0
         edge_pen = 0.0
-        loss = 0.0
+        soft_loss = 0.0
+        soft_reward = 0.0
         composite_soft = 0.0
         for b in self.problem.objective.band_demands:
             for band in bands:
@@ -554,26 +569,32 @@ class GreedyConstructor:
         for iid, plan in selection.items():
             witness = self._witness.get(plan.id, {})
             for c in plan.soft_constraints:
-                cost = self._soft_violation_plan(plan, c, witness)
-                coef = c.soft.coef if c.soft is not None else 0.0
-                owner = c.soft.owner if c.soft is not None else "intersection_loss"
-                if owner == "intersection_loss":
-                    loss += cost
+                assert c.soft is not None
+                lhs = self._plan_constraint_lhs(plan, c, witness)
+                rhs = c.rhs_for_cycle(self.C)
+                coef = c.soft.coef
+                if c.soft.owner == "intersection_reward":
+                    soft_reward += coef * self._reward_from_lhs(lhs, c.sense, rhs)
+                elif c.soft.owner == "intersection_loss":
+                    soft_loss += coef * self._violation_from_lhs(lhs, c.sense, rhs)
                 else:
-                    composite_soft += cost
+                    composite_soft += coef * self._violation_from_lhs(lhs, c.sense, rhs)
         # global hard/soft constraints
         for c in self.problem.global_constraints:
-            viol = self._global_violation(c, selection, offsets, bands)
+            lhs = self._global_value(c, selection, offsets, bands)
+            rhs = c.rhs_for_cycle(self.C)
+            viol = self._violation_from_lhs(lhs, c.sense, rhs)
             if c.hard:
                 if viol > 1e-7:
-                    return -1e18, loss, reward
+                    return -1e18, soft_loss - soft_reward, reward
             else:
                 assert c.soft is not None
-                cost = c.soft.coef * viol
-                if c.soft.owner == "intersection_loss":
-                    loss += cost
+                if c.soft.owner == "intersection_reward":
+                    soft_reward += c.soft.coef * self._reward_from_lhs(lhs, c.sense, rhs)
+                elif c.soft.owner == "intersection_loss":
+                    soft_loss += c.soft.coef * viol
                 else:
-                    composite_soft += cost
+                    composite_soft += c.soft.coef * viol
 
         # 均衡组：按实际构造出的带，计算归一化后的组内最小带宽。
         agg = {b.id: sum(band.width_s for band in bands if band.demand == b.id)
@@ -601,19 +622,20 @@ class GreedyConstructor:
         # 具名聚合：按选中方案 + witness δ 算真实值，再按贡献方向计入。
         aggregate_band = 0.0
         aggregate_loss = 0.0
+        aggregate_reward = 0.0
         for spec in self.problem.aggregates:
             value = self._aggregate_value(spec, selection)
             for c in spec.contributions:
                 if c.target == "band_objective":
-                    sign = 1.0 if spec.op == "min" else -1.0
-                    aggregate_band += sign * c.weight * value
+                    aggregate_band += c.sign * c.weight * value
+                elif c.target == "intersection_reward":
+                    aggregate_reward += c.sign * c.weight * value
                 else:
-                    sign = -1.0 if spec.op == "min" else 1.0
-                    aggregate_loss += sign * c.weight * value
+                    aggregate_loss += c.sign * c.weight * value
         composite = (reward - margin_pen - edge_pen - composite_soft
                      + balanced_reward + aggregate_band)
-        loss += aggregate_loss
-        return composite, loss, reward
+        cost = (soft_loss + aggregate_loss) - (soft_reward + aggregate_reward)
+        return composite, cost, reward
 
     def _make_solution(self, selection, offsets, bands) -> GreedySolution:
         comp, loss, _ = self._evaluate(selection, offsets, bands)

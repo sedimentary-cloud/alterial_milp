@@ -36,7 +36,8 @@ from . import naming
 from .expressions import LinearExpr
 from .meta import (AggregateModel, BalancedGroupModel, BigMTable,
                    BoundarySlackRef, GreenDemandModel, MarginSlackRef, ModelMeta,
-                   RedBoundarySlackRef, RedDemandModel, SoftPenaltyRef)
+                   RedBoundarySlackRef, RedDemandModel, SoftPenaltyRef,
+                   SoftRewardRef)
 from .variables import GVarType, VarHandle, VariableRegistry
 from .windows import EffectiveWindowBuilder, EffectiveWindowSet, RedWindowBuilder
 
@@ -111,7 +112,7 @@ class ArterialModel:
             for h in ref.end_vars:
                 expr.add(h, -ref.end_coef)
         for ref in self.meta.soft:
-            if ref.owner == "composite":
+            if ref.owner == "band_loss":
                 expr.add(self.vars.by_name(ref_label(ref)), -ref.coef)
         # 均衡组：把组内最小归一化带宽 z 加入目标；
         # 如果设置了 min_existing 软约束，再减去存在数短缺罚。
@@ -126,25 +127,49 @@ class ArterialModel:
             for c in am.spec.contributions:
                 if c.target != "band_objective":
                     continue
-                # min 是奖励（+），max 是罚项（−）；两者都把 t 推向正确方向。
-                sign = 1.0 if am.spec.op == "min" else -1.0
-                expr.add(value, sign * c.weight)
+                expr.add(value, c.sign * c.weight)
         return expr
 
-    def expr_loss(self) -> LinearExpr:
+    def expr_intersection_reward(self) -> LinearExpr:
+        """路口回报 R_int：软约束超额满足 + aggregate 回报项。"""
+        expr = LinearExpr()
+        for ref in self.meta.rewards:
+            expr.add(self.vars.by_name(ref.label), ref.coef)
+        for am in self.meta.aggregates.values():
+            value = self._aggregate_expr_value(am)
+            for c in am.spec.contributions:
+                if c.target == "intersection_reward":
+                    expr.add(value, c.sign * c.weight)
+        return expr
+
+    def expr_intersection_loss(self) -> LinearExpr:
+        """路口损失 L_int：软约束违反量 + aggregate 损失项。"""
         expr = LinearExpr()
         for ref in self.meta.soft:
             if ref.owner == "intersection_loss":
                 expr.add(self.vars.by_name(ref_label(ref)), ref.coef)
-        # 具名聚合的贡献：路口损失（最小化）里，min 是奖励（负项）、max 是罚项。
         for am in self.meta.aggregates.values():
             value = self._aggregate_expr_value(am)
             for c in am.spec.contributions:
-                if c.target != "intersection_loss":
-                    continue
-                sign = -1.0 if am.spec.op == "min" else 1.0
-                expr.add(value, sign * c.weight)
+                if c.target == "intersection_loss":
+                    expr.add(value, c.sign * c.weight)
         return expr
+
+    def expr_intersection_cost(self) -> LinearExpr:
+        """路口净成本 C = L_int − R_int（Pareto 阶段 2 最小化它）。"""
+        expr = self.expr_intersection_loss()
+        expr.add(self.expr_intersection_reward(), -1.0)
+        return expr
+
+    def expr_intersection_composite(self) -> LinearExpr:
+        """路口分数 I = R_int − L_int（Pareto 第二阶段目标，最大化）。"""
+        expr = self.expr_intersection_reward()
+        expr.add(self.expr_intersection_loss(), -1.0)
+        return expr
+
+    def expr_loss(self) -> LinearExpr:
+        # Pareto/旧接口的别名：最小化 net cost 等价于最大化路口分数。
+        return self.expr_intersection_cost()
 
     @staticmethod
     def _aggregate_expr_value(am: AggregateModel) -> LinearExpr:
@@ -740,6 +765,49 @@ class ModelBuilder:
             self.cons.add(row, ">=", rhs - m_big,
                           ConstraintMeta(meta_group, meta_label, refs))
 
+    def _add_activated_reward(self, lhs: LinearExpr, sense: str, rhs: float, *,
+                              coef: float, plan_id: str | None,
+                              x: VarHandle | None, m_big: float,
+                              meta_group: str, meta_label_base: str,
+                              name_base: str, constraint_id_base: str,
+                              refs: dict[str, str]) -> None:
+        """加一条 owner=intersection_reward 的软约束奖励项。
+
+        奖励定义为超额满足量：
+          sense="<=": rho = max(0, rhs - lhs)
+          sense=">=": rho = max(0, lhs - rhs)
+        x=0（方案未选中）时用 rho <= U*x 把奖励夹成 0；约束行本身也用 big-M 松开。
+        """
+        if sense not in ("<=", ">="):
+            raise GWModelError("intersection_reward does not support equality constraints")
+        upper = m_big + abs(rhs) + 1.0
+        var_name = naming.soft_reward(name_base)
+        rho = self.vars.add(var_name, 0.0, upper, GVarType.CONTINUOUS,
+                            {"kind": "soft_reward"})
+        if sense == "<=":
+            row = lhs.copy().add(rho, 1.0)
+            rhs_eff = rhs
+            if x is not None:
+                row.add(x, -m_big)
+                rhs_eff = rhs - m_big
+            self.cons.add(row, ">=", rhs_eff,
+                          ConstraintMeta(meta_group, meta_label_base, refs))
+        else:
+            row = lhs.copy().add(rho, -1.0)
+            rhs_eff = rhs
+            if x is not None:
+                row.add(x, m_big)
+                rhs_eff = rhs + m_big
+            self.cons.add(row, "<=", rhs_eff,
+                          ConstraintMeta(meta_group, meta_label_base, refs))
+        if x is not None:
+            guard = LinearExpr.of(rho, 1.0).add(x, -upper)
+            self.cons.add(guard, "<=", 0.0,
+                          ConstraintMeta(meta_group, f"{meta_label_base}:reward-guard", refs))
+        self.meta.rewards.append(SoftRewardRef(
+            constraint_id=constraint_id_base, expr=lhs.copy(), sense=sense,
+            rhs=rhs, coef=coef, plan_id=plan_id, label=var_name))
+
     def _add_activated_soft(self, lhs: LinearExpr, sense: str, rhs: float, *,
                             coef: float, owner: str, plan_id: str | None,
                             x: VarHandle | None, m_big: float,
@@ -886,14 +954,23 @@ class ModelBuilder:
                     rhs = c.rhs_for_cycle(self.C)
                     lhs = self._constraint_expr(c, p)
                     M = self._constraint_activation_m(c, p)
-                    self._add_activated_soft(
-                        lhs, c.sense, rhs,
-                        coef=c.soft.coef, owner=c.soft.owner, plan_id=p.id,
-                        x=x, m_big=M,
-                        meta_group="PLAN_SOFT", meta_label_base=f"{p.id}:{c.id}",
-                        name_base=f"{p.id}.{c.id}", constraint_id_base=c.id,
-                        refs={"plan": p.id, "constraint": c.id},
-                    )
+                    if c.soft.owner == "intersection_reward":
+                        self._add_activated_reward(
+                            lhs, c.sense, rhs,
+                            coef=c.soft.coef, plan_id=p.id, x=x, m_big=M,
+                            meta_group="PLAN_REWARD", meta_label_base=f"{p.id}:{c.id}",
+                            name_base=f"{p.id}.{c.id}", constraint_id_base=c.id,
+                            refs={"plan": p.id, "constraint": c.id},
+                        )
+                    else:
+                        self._add_activated_soft(
+                            lhs, c.sense, rhs,
+                            coef=c.soft.coef, owner=c.soft.owner, plan_id=p.id,
+                            x=x, m_big=M,
+                            meta_group="PLAN_SOFT", meta_label_base=f"{p.id}:{c.id}",
+                            name_base=f"{p.id}.{c.id}", constraint_id_base=c.id,
+                            refs={"plan": p.id, "constraint": c.id},
+                        )
 
     def _red_windows_for_template(self, iid: str, d: Direction):
         """按需构建并缓存某路口方向的红窗补集。"""
@@ -990,15 +1067,24 @@ class ModelBuilder:
                                                              "TEMPLATE_HARD", label, refs)
                                 else:
                                     assert tmpl.soft is not None
-                                    self._add_activated_soft(
-                                        lhs, tmpl.sense, rhs,
-                                        coef=tmpl.soft.coef, owner=tmpl.soft.owner,
-                                        plan_id=p.id, x=x, m_big=M,
-                                        meta_group="TEMPLATE_SOFT",
-                                        meta_label_base=label,
-                                        name_base=label,
-                                        constraint_id_base=label, refs=refs,
-                                    )
+                                    if tmpl.soft.owner == "intersection_reward":
+                                        self._add_activated_reward(
+                                            lhs, tmpl.sense, rhs,
+                                            coef=tmpl.soft.coef, plan_id=p.id, x=x, m_big=M,
+                                            meta_group="TEMPLATE_REWARD",
+                                            meta_label_base=label, name_base=label,
+                                            constraint_id_base=label, refs=refs,
+                                        )
+                                    else:
+                                        self._add_activated_soft(
+                                            lhs, tmpl.sense, rhs,
+                                            coef=tmpl.soft.coef, owner=tmpl.soft.owner,
+                                            plan_id=p.id, x=x, m_big=M,
+                                            meta_group="TEMPLATE_SOFT",
+                                            meta_label_base=label,
+                                            name_base=label,
+                                            constraint_id_base=label, refs=refs,
+                                        )
                 continue
 
             for p, d, k in self._iter_template_scope(tmpl):
@@ -1016,13 +1102,21 @@ class ModelBuilder:
                                              "TEMPLATE_HARD", label, refs)
                 else:
                     assert tmpl.soft is not None
-                    self._add_activated_soft(
-                        lhs, tmpl.sense, rhs,
-                        coef=tmpl.soft.coef, owner=tmpl.soft.owner,
-                        plan_id=p.id, x=x, m_big=M,
-                        meta_group="TEMPLATE_SOFT", meta_label_base=label,
-                        name_base=label, constraint_id_base=label, refs=refs,
-                    )
+                    if tmpl.soft.owner == "intersection_reward":
+                        self._add_activated_reward(
+                            lhs, tmpl.sense, rhs,
+                            coef=tmpl.soft.coef, plan_id=p.id, x=x, m_big=M,
+                            meta_group="TEMPLATE_REWARD", meta_label_base=label,
+                            name_base=label, constraint_id_base=label, refs=refs,
+                        )
+                    else:
+                        self._add_activated_soft(
+                            lhs, tmpl.sense, rhs,
+                            coef=tmpl.soft.coef, owner=tmpl.soft.owner,
+                            plan_id=p.id, x=x, m_big=M,
+                            meta_group="TEMPLATE_SOFT", meta_label_base=label,
+                            name_base=label, constraint_id_base=label, refs=refs,
+                        )
 
     def _build_plan_constraints(self) -> None:
         self._add_plan_hard()
@@ -1912,6 +2006,13 @@ class ModelBuilder:
                 coef = c.soft.coef
                 owner = c.soft.owner
                 M = self.m.soft + abs(rhs) + lhs.max_abs_atom_bound(3.0 * self.C) + 1.0
+                if owner == "intersection_reward":
+                    self._add_activated_reward(
+                        lhs, c.sense, rhs, coef=coef, plan_id=None, x=None,
+                        m_big=M, meta_group="USER_REWARD",
+                        meta_label_base=f"user:{c.id}", name_base=c.id,
+                        constraint_id_base=c.id, refs={"constraint": c.id})
+                    continue
                 if c.sense in ("<=", "=="):
                     sigma = self.vars.add(naming.soft_slack(c.id, "pos"), 0.0, M, GVarType.CONTINUOUS,
                                           {"kind": "soft_violation"})
