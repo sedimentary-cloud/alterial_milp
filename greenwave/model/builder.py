@@ -27,7 +27,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Literal, Mapping
 
-from ..errors import GWModelError
+from ..errors import GWInvariantError, GWModelError
 from ..preprocess.context import GridPointContext
 from ..schema.models import (BandDemandSpec, ConstraintSpec, ConstraintTemplate,
                              Direction, PlanSpec, ProblemInput, Side)
@@ -523,7 +523,10 @@ class ModelBuilder:
         for t in c.terms:
             a = t.atom
             if a.kind == "boundary" and plan is not None:
-                assert a.direction is not None and a.index is not None
+                if a.direction is None or a.index is None:
+                    raise GWInvariantError(
+                        "boundary atom 缺少 direction/index（应在前置校验拦截）",
+                        hint="检查 AtomRef 的 direction/index 字段。")
                 nom = plan.nominal_boundary_r(a.direction, a.index)
                 r = plan.boundary_adjust_range(a.direction, a.index)
                 lov = (nom + (r[0] if r is not None else 0.0)) * self.C
@@ -952,7 +955,10 @@ class ModelBuilder:
             for p in self.ctx.feasible_plans.get(iid, ()):
                 x = None if fixed else self.meta.plan_vars[p.id]
                 for c in p.soft_constraints:
-                    assert c.soft is not None
+                    if c.soft is None:
+                        raise GWInvariantError(
+                            f"软约束 {c.id!r} 缺少 soft penalty",
+                            hint="hard=false 的约束必须带 soft 字段；检查 schema 校验。")
                     rhs = c.rhs_for_cycle(self.C)
                     lhs = self._constraint_expr(c, p)
                     M = self._constraint_activation_m(c, p)
@@ -1068,7 +1074,10 @@ class ModelBuilder:
                                     self._add_activated_hard(lhs, tmpl.sense, rhs, x, M,
                                                              "TEMPLATE_HARD", label, refs)
                                 else:
-                                    assert tmpl.soft is not None
+                                    if tmpl.soft is None:
+                                        raise GWInvariantError(
+                                            f"约束模板 {tmpl.id!r} 缺少 soft penalty",
+                                            hint="soft-only 模板必须带 soft 字段；检查 schema 校验。")
                                     if tmpl.soft.owner == "intersection_reward":
                                         self._add_activated_reward(
                                             lhs, tmpl.sense, rhs,
@@ -1103,7 +1112,10 @@ class ModelBuilder:
                     self._add_activated_hard(lhs, tmpl.sense, rhs, x, M,
                                              "TEMPLATE_HARD", label, refs)
                 else:
-                    assert tmpl.soft is not None
+                    if tmpl.soft is None:
+                        raise GWInvariantError(
+                            f"约束模板 {tmpl.id!r} 缺少 soft penalty",
+                            hint="soft-only 模板必须带 soft 字段；检查 schema 校验。")
                     if tmpl.soft.owner == "intersection_reward":
                         self._add_activated_reward(
                             lhs, tmpl.sense, rhs,
@@ -1592,7 +1604,10 @@ class ModelBuilder:
         for b in self.problem.objective.band_demands:
             if b.type != "red":
                 continue
-            assert len(b.nodes) == 2
+            if len(b.nodes) != 2:
+                raise GWInvariantError(
+                    f"红波需求 {b.id!r} 的节点数应为 2，实际 {len(b.nodes)}",
+                    hint="检查 demand.nodes 配置；红波带只支持相邻对。")
             up_node, down_node = b.nodes
             d = b.direction
             tau = self.ctx.tau_s.get((up_node, d))
@@ -2006,7 +2021,10 @@ class ModelBuilder:
                 self.cons.add(lhs.copy(), c.sense, rhs,
                               ConstraintMeta("USER_HARD", f"user:{c.id}", {"constraint": c.id}))
             else:
-                assert c.soft is not None
+                if c.soft is None:
+                    raise GWInvariantError(
+                        f"软约束 {c.id!r} 缺少 soft penalty",
+                        hint="hard=false 的约束必须带 soft 字段；检查 schema 校验。")
                 coef = c.soft.coef
                 owner = c.soft.owner
                 M = self.m.soft + abs(rhs) + lhs.max_abs_atom_bound(3.0 * self.C) + 1.0

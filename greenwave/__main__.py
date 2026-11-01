@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from types import SimpleNamespace
 
+from .errors import GWError, GWInputError
 from .heuristic.greedy import ConstructedBand
 from .pipeline import run
 from .preprocess.feasibility import FeasibilityFilter
@@ -43,11 +45,20 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true",
                         help="only compile semantics, do not solve")
     args = parser.parse_args(argv)
-    with open(args.input, "r", encoding="utf-8") as f:
-        problem_json = json.load(f)
-    if args.semantics:
-        with open(args.semantics, "r", encoding="utf-8") as f:
-            semantics_json = json.load(f)
+    try:
+        with open(args.input, "r", encoding="utf-8") as f:
+            problem_json = json.load(f)
+        if args.semantics:
+            with open(args.semantics, "r", encoding="utf-8") as f:
+                semantics_json = json.load(f)
+    except OSError as exc:
+        raise GWInputError(f"无法读取输入文件：{exc}",
+                           cause="文件路径不存在、拼写错误，或当前用户没有读取权限。",
+                           hint="检查 --input/--semantics 路径是否存在、是否有读取权限") from exc
+    except json.JSONDecodeError as exc:
+        raise GWInputError(f"输入 JSON 解析失败：{exc}",
+                           cause="文件内容不是合法 JSON。",
+                           hint="检查 JSON 语法（逗号、引号、括号）") from exc
         compiled = compile_semantics(problem_json, semantics_json)
         problem_json = compiled.problem_json
         if args.dry_run:
@@ -90,4 +101,8 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except GWError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        raise SystemExit(2)

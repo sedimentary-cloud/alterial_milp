@@ -51,6 +51,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from greenwave.errors import GWInputError
 from greenwave.model import naming
 from greenwave.model.builder import ModelBuilder
 from greenwave.preprocess.feasibility import FeasibilityFilter
@@ -109,8 +110,8 @@ def objective_spec(objective: str) -> ObjectiveSpec:
     try:
         return _OBJECTIVE_BY_ID[objective]
     except KeyError:                                  # pragma: no cover - 防御
-        raise KeyError(f"unknown objective {objective!r}, "
-                       f"expected one of {OBJECTIVE_IDS}") from None
+        raise GWInputError(f"unknown objective {objective!r}",
+                           hint=f"expected one of {OBJECTIVE_IDS}") from None
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +296,8 @@ def objective_demands(objective: str, nodes: Sequence[str], *,
         for a, b in pairs:
             out.append(_demand(f"RW_down_{b}_{a}", "red", "down", [b, a]))
     else:                                             # pragma: no cover - 防御
-        raise KeyError(f"unknown objective {objective!r}")
+        raise GWInputError(f"unknown objective {objective!r}",
+                               hint=f"available: {sorted(OBJECTIVES)}")
 
     for d in out:
         d["max_bands"] = 2 if (double_cycle and demand_needs_two_slots(d, nodes)) else 1

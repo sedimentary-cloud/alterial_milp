@@ -135,14 +135,14 @@ def round_floats(obj: Any, digits: int = 6) -> Any:
 def grid_values_step(lo: float, hi: float, step: float) -> list[float]:
     """按**目标步长**取点：点数 = ceil((hi-lo)/step) + 1（步长会取整到尽量接近）。"""
     if step <= 0:
-        raise ValueError("--step 必须为正")
+        raise GWInputError("--step 必须为正", hint="给 --step 传一个 > 0 的数")
     cells = max(2, int(math.ceil((float(hi) - float(lo)) / float(step))) + 1)
     return grid_values(lo, hi, cells)
 
 
 def grid_values(lo: float, hi: float, cells: int) -> list[float]:
     if cells < 2:
-        raise ValueError("--cells 至少 2")
+        raise GWInputError("--cells 至少 2", hint="给 --cells 传 >= 2 的整数")
     step = (float(hi) - float(lo)) / (cells - 1)
     return [round(float(lo) + i * step, 6) for i in range(cells)]
 

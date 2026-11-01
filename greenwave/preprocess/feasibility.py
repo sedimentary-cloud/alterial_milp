@@ -14,7 +14,7 @@ from typing import Any, cast
 import numpy as np
 from scipy.optimize import linprog
 
-from ..errors import GWInfeasibleGridPoint
+from ..errors import GWInvariantError, GWInfeasibleGridPoint, GWInputError
 from ..schema.models import ConstraintSpec, Direction, PlanSpec, ProblemInput, Side
 from .context import (DemandTravelTable, DroppedPlanRecord, GridPointContext,
                       PlanFeasibility)
@@ -62,20 +62,30 @@ class FeasibilityFilter:
         for t in c.terms:
             a = t.atom
             if a.kind == "boundary":
-                assert a.direction is not None and a.index is not None
+                if a.direction is None or a.index is None:
+                    raise GWInvariantError(
+                        "boundary atom 缺少 direction/index（应在前置校验拦截）",
+                        hint="检查 AtomRef 的 direction/index 字段。")
                 val = self._boundary_seconds(plan, a.direction, a.index,
                                              deltas.get((a.direction, a.index), 0.0), cycle_s)
             elif a.kind == "window_duration":
-                assert a.direction is not None and a.window is not None
+                if a.direction is None or a.window is None:
+                    raise GWInvariantError(
+                        "duration atom 缺少 direction/window（应在前置校验拦截）",
+                        hint="检查 AtomRef 的 direction/window 字段。")
                 w = plan.window_edge_span(a.direction, a.window)
                 start = self._edge_seconds(plan, a.direction, w.start_edge, cycle_s, deltas)
                 end = self._edge_seconds(plan, a.direction, w.end_edge, cycle_s, deltas)
                 val = end + w.wrap * cycle_s - start
             elif a.kind == "red_duration":
-                assert a.direction is not None and a.window is not None
+                if a.direction is None or a.window is None:
+                    raise GWInvariantError(
+                        "duration atom 缺少 direction/window（应在前置校验拦截）",
+                        hint="检查 AtomRef 的 direction/window 字段。")
                 reds = plan.derived_red_intervals(a.direction)
                 if a.window < 1 or a.window > len(reds):
-                    raise ValueError(f"red_duration references unknown rid {a.window}")
+                    raise GWInputError(f"red_duration references unknown rid {a.window}",
+                                       hint="red_duration.window 必须落在该方向的 rid 范围内")
                 r = reds[a.window - 1]
                 start = self._edge_seconds(plan, a.direction, r.start_edge, cycle_s, deltas)
                 end = self._edge_seconds(plan, a.direction, r.end_edge, cycle_s, deltas)
@@ -193,13 +203,19 @@ class FeasibilityFilter:
             for t in c.terms:
                 a = t.atom
                 if a.kind == "boundary":
-                    assert a.direction is not None and a.index is not None
+                    if a.direction is None or a.index is None:
+                        raise GWInvariantError(
+                            "boundary atom 缺少 direction/index（应在前置校验拦截）",
+                            hint="检查 AtomRef 的 direction/index 字段。")
                     const, cf = boundary_coefs(a.direction, a.index)
                     constant += t.coef * const
                     for i, val in cf.items():
                         coefs[i] = coefs.get(i, 0.0) + t.coef * val
                 elif a.kind == "window_duration":
-                    assert a.direction is not None and a.window is not None
+                    if a.direction is None or a.window is None:
+                        raise GWInvariantError(
+                            "duration atom 缺少 direction/window（应在前置校验拦截）",
+                            hint="检查 AtomRef 的 direction/window 字段。")
                     w = plan.window_edge_span(a.direction, a.window)
                     s_const, s_cf = edge_seconds_coefs(a.direction, w.start_edge)
                     e_const, e_cf = edge_seconds_coefs(a.direction, w.end_edge)
@@ -210,10 +226,14 @@ class FeasibilityFilter:
                     for i, val in s_cf.items():
                         coefs[i] = coefs.get(i, 0.0) - t.coef * val
                 elif a.kind == "red_duration":
-                    assert a.direction is not None and a.window is not None
+                    if a.direction is None or a.window is None:
+                        raise GWInvariantError(
+                            "duration atom 缺少 direction/window（应在前置校验拦截）",
+                            hint="检查 AtomRef 的 direction/window 字段。")
                     reds = plan.derived_red_intervals(a.direction)
                     if a.window < 1 or a.window > len(reds):
-                        raise ValueError(f"red_duration references unknown rid {a.window}")
+                        raise GWInputError(f"red_duration references unknown rid {a.window}",
+                                       hint="red_duration.window 必须落在该方向的 rid 范围内")
                     r = reds[a.window - 1]
                     s_const, s_cf = edge_seconds_coefs(a.direction, r.start_edge)
                     e_const, e_cf = edge_seconds_coefs(a.direction, r.end_edge)
@@ -290,7 +310,10 @@ class FeasibilityFilter:
 
         if feasible:
             # 前 n 个变量才是 δ；z 只是目标里的辅助量。
-            assert x is not None
+            if x is None:
+                raise GWInvariantError(
+                    "linprog 返回可行状态但解向量为空",
+                    hint="可能是 scipy 版本/数值问题；保留输入并反馈。")
             witness: tuple[tuple[Direction, int, float], ...] = tuple(
                 (cast(Direction, d), int(j), float(x[index[(d, j)]]))
                 for (d, j) in keys)

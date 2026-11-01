@@ -20,7 +20,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from greenwave import run  # noqa: E402
+from greenwave import run
+from greenwave.errors import GWSolveError  # noqa: E402
 from greenwave.model.builder import ModelBuilder  # noqa: E402
 from greenwave.preprocess.feasibility import FeasibilityFilter  # noqa: E402
 from greenwave.report import (ParetoFrontierDiagram, SolutionDecoder,  # noqa: E402
@@ -53,7 +54,8 @@ def _solve_stage1(problem_dict: dict, cycle_s: float, kappa: float):
         mip_rel_gap=problem.solver.mip_rel_gap,
     ))
     if result.values is None:
-        raise RuntimeError(f"standard case solve failed: {result.status} {result.message}")
+        raise GWSolveError(f"standard case solve failed: {result.status} {result.message}",
+                           hint="检查 solver.backend / time_limit_s，或降低标准案例规模")
     return problem, ctx, SolutionDecoder(model).decode(result.values)
 
 

@@ -21,6 +21,8 @@
 """
 from __future__ import annotations
 
+from ..errors import GWInvariantError, GWInputError
+
 from dataclasses import dataclass, field, replace
 from typing import Any, ClassVar, Literal, Mapping, Sequence, cast
 
@@ -42,18 +44,18 @@ def _num(value: Any, name: str) -> float:
     try:
         return float(value)
     except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
-        raise ValueError(f"{name} must be numeric, got {value!r}") from exc
+        raise GWInputError(f"{name} must be numeric, got {value!r}") from exc
 
 
 def _check_direction(value: Any) -> Direction:
     if value not in ("up", "down"):
-        raise ValueError(f"direction must be 'up' or 'down', got {value!r}")
+        raise GWInputError(f"direction must be 'up' or 'down', got {value!r}")
     return value  # type: ignore[return-value]
 
 
 def _check_side(value: Any) -> Side:
     if value not in ("start", "end"):
-        raise ValueError(f"side must be 'start' or 'end', got {value!r}")
+        raise GWInputError(f"side must be 'start' or 'end', got {value!r}")
     return value  # type: ignore[return-value]
 
 
@@ -71,7 +73,7 @@ class BoundarySpec:
         if self.adjust is not None:
             lo, hi = self.adjust
             if lo > 0.0 or hi < 0.0:
-                raise ValueError("boundary adjust range must satisfy lo <= 0 <= hi")
+                raise GWInputError("boundary adjust range must satisfy lo <= 0 <= hi")
 
     @property
     def lo_r(self) -> float:
@@ -92,15 +94,15 @@ class BoundarySpec:
         if isinstance(obj, (int, float)):
             return cls(float(obj))
         if not isinstance(obj, Mapping):
-            raise ValueError(f"boundary must be a number or object, got {obj!r}")
+            raise GWInputError(f"boundary must be a number or object, got {obj!r}")
         pos = obj.get("pos_r", obj.get("pos"))
         if pos is None:
-            raise ValueError("boundary object requires pos_r")
+            raise GWInputError("boundary object requires pos_r")
         adj = obj.get("adjust")
         if adj is None:
             return cls(_num(pos, "pos_r"))
         if not isinstance(adj, (list, tuple)) or len(adj) != 2:
-            raise ValueError("boundary adjust must be a two-element [lo, hi] range")
+            raise GWInputError("boundary adjust must be a two-element [lo, hi] range")
         return cls(_num(pos, "pos_r"), (_num(adj[0], "adjust.lo"), _num(adj[1], "adjust.hi")))
 
 
@@ -114,15 +116,15 @@ class DirectionPlan:
     def __post_init__(self) -> None:
         pos = [b.pos_r for b in self.boundaries]
         if any(not (0.0 < p < 1.0) for p in pos):
-            raise ValueError("boundary positions must be in (0, 1)")
+            raise GWInputError("boundary positions must be in (0, 1)")
         for a, b in zip(pos, pos[1:]):
             if a >= b:
-                raise ValueError("boundary positions must be strictly increasing")
+                raise GWInputError("boundary positions must be strictly increasing")
         if len(self.green_mask) != len(self.boundaries) + 1:
-            raise ValueError("green_mask length must equal boundary count + 1")
+            raise GWInputError("green_mask length must equal boundary count + 1")
         for seg in self.green_mask:
             if not isinstance(seg, GreenSegmentSpec):
-                raise ValueError(
+                raise GWInputError(
                     "green_mask entries must be GreenSegmentSpec objects "
                     '({"green": ..., "margin": ...}), not booleans')
 
@@ -142,12 +144,12 @@ class DirectionPlan:
         if obj is None:
             return cls()
         if not isinstance(obj, Mapping):
-            raise ValueError(f"direction plan must be an object, got {obj!r}")
+            raise GWInputError(f"direction plan must be an object, got {obj!r}")
         raw_bounds = obj.get("boundaries", ())
         boundaries = tuple(BoundarySpec.from_obj(b) for b in raw_bounds)
         raw_mask = obj.get("green_mask", obj.get("mask"))
         if raw_mask is None:
-            raise ValueError("direction plan requires green_mask")
+            raise GWInputError("direction plan requires green_mask")
         green_mask = tuple(GreenSegmentSpec.from_obj(x) for x in raw_mask)
         return cls(boundaries, green_mask)
 
@@ -189,45 +191,48 @@ class AtomRef:
     def __post_init__(self) -> None:
         if self.kind == "offset":
             if self.intersection is None:
-                raise ValueError("offset atom requires intersection")
+                raise GWInputError("offset atom requires intersection")
         elif self.kind == "boundary":
             missing = [n for n, v in (
                 ("intersection", self.intersection), ("plan", self.plan),
                 ("direction", self.direction), ("index", self.index)) if v is None]
             if missing:
-                raise ValueError(f"boundary atom missing fields: {missing}")
+                raise GWInputError(f"boundary atom missing fields: {missing}")
             if self.direction not in ("up", "down"):
-                raise ValueError("boundary atom direction must be up/down")
-            assert self.index is not None
+                raise GWInputError("boundary atom direction must be up/down")
+            if self.index is None:
+                raise GWInvariantError(
+                    "boundary atom 的 index 为 None（应在前置校验拦截）",
+                    hint="检查 AtomRef.index 字段。")
             if self.index < 0:
-                raise ValueError("boundary atom index must be >= 0")
+                raise GWInputError("boundary atom index must be >= 0")
         elif self.kind in ("window_duration", "red_duration"):
             if self.direction is not None:
                 _check_direction(self.direction)
             if self.kind == "window_duration" and self.window is not None and self.window < 0:
-                raise ValueError("window_duration atom window index must be >= 0")
+                raise GWInputError("window_duration atom window index must be >= 0")
             if self.kind == "red_duration" and self.window is not None and self.window < 1:
-                raise ValueError("red_duration atom rid must be >= 1")
+                raise GWInputError("red_duration atom rid must be >= 1")
         elif self.kind == "bandwidth":
             if self.demand is None:
-                raise ValueError("bandwidth atom requires demand")
+                raise GWInputError("bandwidth atom requires demand")
         elif self.kind == "const":
             if self.const is None:
-                raise ValueError("const atom requires const")
+                raise GWInputError("const atom requires const")
         else:  # pragma: no cover - Literal is developer-facing
-            raise ValueError(f"unknown atom kind {self.kind!r}")
+            raise GWInputError(f"unknown atom kind {self.kind!r}")
         if self.unit is not None:
             if self.kind != "const":
-                raise ValueError("atom unit is only allowed on const atoms")
+                raise GWInputError("atom unit is only allowed on const atoms")
             if self.unit not in ("s", "ratio"):
-                raise ValueError(f"const atom unit must be 's' or 'ratio', got {self.unit!r}")
+                raise GWInputError(f"const atom unit must be 's' or 'ratio', got {self.unit!r}")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "AtomRef":
         if isinstance(obj, AtomRef):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"atom must be an object, got {obj!r}")
+            raise GWInputError(f"atom must be an object, got {obj!r}")
         return cls(
             kind=obj["kind"],
             intersection=obj.get("intersection"),
@@ -267,9 +272,9 @@ class SoftPenalty:
 
     def __post_init__(self) -> None:
         if self.owner not in ("band_loss", "intersection_reward", "intersection_loss"):
-            raise ValueError(f"unknown soft constraint owner {self.owner!r}")
+            raise GWInputError(f"unknown soft constraint owner {self.owner!r}")
         if self.coef <= 0.0:
-            raise ValueError("soft constraint coef must be > 0")
+            raise GWInputError("soft constraint coef must be > 0")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "SoftPenalty":
@@ -290,18 +295,18 @@ def _parse_rhs_fields(obj: Mapping[str, Any]) -> tuple[float | None, float | Non
     rhs = obj.get("rhs")
     unit = obj.get("rhs_unit")
     if rhs is None and unit is not None:
-        raise ValueError(
+        raise GWInputError(
             "rhs_unit requires rhs; use rhs_s/rhs_ratio or provide rhs with rhs_unit")
     if rhs is not None:
         if obj.get("rhs_s") is not None or obj.get("rhs_ratio") is not None:
-            raise ValueError("rhs and rhs_s/rhs_ratio cannot be provided together")
+            raise GWInputError("rhs and rhs_s/rhs_ratio cannot be provided together")
         if unit is None:
             unit = "s"
         if unit == "s":
             return _num(rhs, "rhs"), None
         if unit == "ratio":
             return None, _num(rhs, "rhs")
-        raise ValueError(f"rhs_unit must be 's' or 'ratio', got {unit!r}")
+        raise GWInputError(f"rhs_unit must be 's' or 'ratio', got {unit!r}")
     rhs_s = obj.get("rhs_s")
     rhs_ratio = obj.get("rhs_ratio")
     return (_num(rhs_s, "rhs_s") if rhs_s is not None else None,
@@ -321,17 +326,17 @@ class ConstraintSpec:
 
     def __post_init__(self) -> None:
         if self.sense not in ("<=", ">=", "=="):
-            raise ValueError(f"unknown constraint sense {self.sense!r}")
+            raise GWInputError(f"unknown constraint sense {self.sense!r}")
         if self.rhs_s is None and self.rhs_ratio is None:
-            raise ValueError(
+            raise GWInputError(
                 "rhs_s and rhs_ratio cannot both be missing; they are additive "
                 "when both are provided (rhs = rhs_ratio*C + rhs_s)")
         if self.hard:
             if self.soft is not None:
-                raise ValueError("hard constraint must not carry soft penalty")
+                raise GWInputError("hard constraint must not carry soft penalty")
         else:
             if self.soft is None:
-                raise ValueError("soft constraint requires soft penalty")
+                raise GWInputError("soft constraint requires soft penalty")
 
     def rhs_for_cycle(self, cycle_s: float) -> float:
         """RHS = rhs_ratio × C + rhs_s（两项都可选，同时给就是相加）。"""
@@ -347,7 +352,7 @@ class ConstraintSpec:
         if isinstance(obj, ConstraintSpec):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"constraint must be an object, got {obj!r}")
+            raise GWInputError(f"constraint must be an object, got {obj!r}")
         soft_obj = obj.get("soft")
         rhs_s, rhs_ratio = _parse_rhs_fields(obj)
         return cls(
@@ -378,17 +383,17 @@ class ConstraintScope:
     def __post_init__(self) -> None:
         if self.kind not in ("all_plan_windows", "all_plan_red_windows",
                              "specific_plan_windows", "all_plans", "all_windows_of_plan"):
-            raise ValueError(f"unknown constraint scope kind {self.kind!r}")
+            raise GWInputError(f"unknown constraint scope kind {self.kind!r}")
         if not self.directions:
-            raise ValueError("constraint scope directions must not be empty")
+            raise GWInputError("constraint scope directions must not be empty")
         for d in self.directions:
             _check_direction(d)
         if self.window_indices is not None and any(k < 0 for k in self.window_indices):
-            raise ValueError("constraint scope window_indices must be >= 0")
+            raise GWInputError("constraint scope window_indices must be >= 0")
         if self.kind in ("all_windows_of_plan", "specific_plan_windows") and not self.plan_ids:
-            raise ValueError(f"constraint scope kind {self.kind!r} requires plan_ids")
+            raise GWInputError(f"constraint scope kind {self.kind!r} requires plan_ids")
         if self.kind == "specific_plan_windows" and not self.window_indices:
-            raise ValueError("constraint scope kind 'specific_plan_windows' requires window_indices")
+            raise GWInputError("constraint scope kind 'specific_plan_windows' requires window_indices")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "ConstraintScope":
@@ -397,7 +402,7 @@ class ConstraintScope:
         if obj is None:
             return cls()
         if not isinstance(obj, Mapping):
-            raise ValueError(f"constraint scope must be an object, got {obj!r}")
+            raise GWInputError(f"constraint scope must be an object, got {obj!r}")
         raw_dirs = obj.get("directions")
         directions: tuple[Direction, ...]
         if raw_dirs is None:
@@ -435,17 +440,17 @@ class ConstraintTemplate:
 
     def __post_init__(self) -> None:
         if self.sense not in ("<=", ">=", "=="):
-            raise ValueError(f"unknown constraint sense {self.sense!r}")
+            raise GWInputError(f"unknown constraint sense {self.sense!r}")
         if self.rhs_s is None and self.rhs_ratio is None:
-            raise ValueError(
+            raise GWInputError(
                 "rhs_s and rhs_ratio cannot both be missing; they are additive "
                 "when both are provided (rhs = rhs_ratio*C + rhs_s)")
         if self.hard:
             if self.soft is not None:
-                raise ValueError("hard constraint template must not carry soft penalty")
+                raise GWInputError("hard constraint template must not carry soft penalty")
         else:
             if self.soft is None:
-                raise ValueError("soft constraint template requires soft penalty")
+                raise GWInputError("soft constraint template requires soft penalty")
 
     def rhs_for_cycle(self, cycle_s: float) -> float:
         """RHS = rhs_ratio × C + rhs_s（两项都可选，同时给就是相加）。"""
@@ -461,7 +466,7 @@ class ConstraintTemplate:
         if isinstance(obj, ConstraintTemplate):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"constraint template must be an object, got {obj!r}")
+            raise GWInputError(f"constraint template must be an object, got {obj!r}")
         soft_obj = obj.get("soft")
         rhs_s, rhs_ratio = _parse_rhs_fields(obj)
         return cls(
@@ -495,7 +500,7 @@ class PlanSpec:
 
     def __post_init__(self) -> None:
         if self.min_phase_s < 0.0:
-            raise ValueError("min_phase_s must be >= 0")
+            raise GWInputError("min_phase_s must be >= 0")
         for d in ("up", "down"):
             dp = self.directions.get(d)
             if dp is None:
@@ -503,12 +508,12 @@ class PlanSpec:
             if self.double_cycle:
                 for b in dp.boundaries:
                     if not (0.0 < b.pos_r < 0.5):
-                        raise ValueError(
+                        raise GWInputError(
                             f"plan {self.id!r} double_cycle {d} boundaries must be in (0, 0.5)")
             else:
                 for b in dp.boundaries:
                     if not (0.0 < b.pos_r < 1.0):
-                        raise ValueError(
+                        raise GWInputError(
                             f"plan {self.id!r} {d} boundaries must be in (0, 1)")
 
     # -- declared access ------------------------------------------------------
@@ -564,7 +569,7 @@ class PlanSpec:
     @staticmethod
     def _windows_from_ratios(ratios, mask, plan_id: str, d: Direction):
         if mask and mask[0] and mask[-1]:
-            raise ValueError(
+            raise GWInputError(
                 f"plan {plan_id!r} {d} green_mask first and last intervals are both green; "
                 f"rotate the plan so the complete green interval lies inside one cycle")
         out: list[DerivedInterval] = []
@@ -688,9 +693,9 @@ class PlanSpec:
         if isinstance(obj, PlanSpec):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"plan must be an object, got {obj!r}")
+            raise GWInputError(f"plan must be an object, got {obj!r}")
         if "windows" in obj and "directions" not in obj:
-            raise ValueError(
+            raise GWInputError(
                 "v2 schema no longer accepts 'windows'; use directions[d].boundaries + green_mask")
         directions_in = obj.get("directions", {}) or {}
         directions: dict[Direction, DirectionPlan] = {}
@@ -738,7 +743,7 @@ class SegmentSpec:
             return float(self.distance_down_m)
         if self.distance_m is not None:
             return float(self.distance_m)
-        raise ValueError(
+        raise GWInputError(
             f"segment {self.from_}->{self.to} has no distance for direction {d!r}"
         )
 
@@ -782,10 +787,10 @@ class CorridorSpec:
         idx = self.index(intersection_id)
         if d == "up":
             if idx >= len(self.segments):
-                raise IndexError(f"no up segment from {intersection_id}")
+                raise GWInputError(f"no up segment from {intersection_id}")
             return idx, self.segments[idx]
         if idx <= 0:
-            raise IndexError(f"no down segment from {intersection_id}")
+            raise GWInputError(f"no down segment from {intersection_id}")
         return idx - 1, self.segments[idx - 1]
 
     @classmethod
@@ -847,15 +852,15 @@ class GreenSegmentSpec:
             # 简写：只给颜色、不带 margin。正式格式仍是对象。
             return cls(green=obj)
         if not isinstance(obj, Mapping):
-            raise ValueError(f"green segment must be an object, got {obj!r}")
+            raise GWInputError(f"green segment must be an object, got {obj!r}")
         if "green" not in obj:
-            raise ValueError(f"green segment requires a 'green' boolean: {obj!r}")
+            raise GWInputError(f"green segment requires a 'green' boolean: {obj!r}")
         margin = obj.get("margin")
         start = None
         end = None
         if margin is not None:
             if not isinstance(margin, Mapping):
-                raise ValueError(f"green segment margin must be an object, got {margin!r}")
+                raise GWInputError(f"green segment margin must be an object, got {margin!r}")
             if margin.get("start") is not None:
                 start = MarginSpec.from_obj(margin["start"])
             if margin.get("end") is not None:
@@ -885,11 +890,11 @@ class EdgeSpec:
 
     def __post_init__(self) -> None:
         if self.free_s < 0:
-            raise ValueError("edge free_s must be >= 0")
+            raise GWInputError("edge free_s must be >= 0")
         if self.coef < 0:
-            raise ValueError("edge coef must be >= 0")
+            raise GWInputError("edge coef must be >= 0")
         if self.hard_max_s is not None and self.hard_max_s < self.free_s:
-            raise ValueError("edge hard_max_s must be >= free_s")
+            raise GWInputError("edge hard_max_s must be >= free_s")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "EdgeSpec | None":
@@ -898,7 +903,7 @@ class EdgeSpec:
         if obj is None:
             return None
         if not isinstance(obj, Mapping):
-            raise ValueError(f"edge spec must be an object, got {obj!r}")
+            raise GWInputError(f"edge spec must be an object, got {obj!r}")
         hard = obj.get("hard_max_s")
         return cls(
             free_s=_num(obj.get("free_s", 0.0), "free_s"),
@@ -930,7 +935,7 @@ class BoundaryAffinitySpec:
         if obj is None:
             return cls()
         if not isinstance(obj, Mapping):
-            raise ValueError(f"boundary affinity spec must be an object, got {obj!r}")
+            raise GWInputError(f"boundary affinity spec must be an object, got {obj!r}")
         return cls(
             start=EdgeSpec.from_obj(obj.get("start")),
             end=EdgeSpec.from_obj(obj.get("end")),
@@ -958,19 +963,19 @@ class BandDemandSpec:
 
     def __post_init__(self) -> None:
         if self.type not in ("green", "red"):
-            raise ValueError("demand type must be green/red")
+            raise GWInputError("demand type must be green/red")
         _check_direction(self.direction)
         if self.red_boundary is not None and self.type != "red":
-            raise ValueError(f"red_boundary is only valid for red demand {self.id!r}")
+            raise GWInputError(f"red_boundary is only valid for red demand {self.id!r}")
         if self.green_boundary is not None and self.type != "green":
-            raise ValueError(f"green_boundary is only valid for green demand {self.id!r}")
+            raise GWInputError(f"green_boundary is only valid for green demand {self.id!r}")
 
     @classmethod
     def from_obj(cls, obj: Any) -> "BandDemandSpec":
         if isinstance(obj, BandDemandSpec):
             return obj
         if "margin" in obj:
-            raise ValueError(
+            raise GWInputError(
                 "demand-level margin was removed; configure margin on each green segment: "
                 '{"green": true, "margin": {"start": {...}, "end": {...}}}')
         return cls(
@@ -1082,13 +1087,13 @@ class AggregateContributionSpec:
 
     def __post_init__(self) -> None:
         if self.target not in ("band_objective", "intersection_reward", "intersection_loss"):
-            raise ValueError(f"unknown aggregate contribution target {self.target!r}")
+            raise GWInputError(f"unknown aggregate contribution target {self.target!r}")
         if self.sign not in (-1, 1):
-            raise ValueError(f"aggregate contribution sign must be +1 or -1, got {self.sign!r}")
+            raise GWInputError(f"aggregate contribution sign must be +1 or -1, got {self.sign!r}")
         if self.weight <= 0.0:
-            raise ValueError("aggregate contribution weight must be > 0")
+            raise GWInputError("aggregate contribution weight must be > 0")
         if self.direction not in ("maximize", "minimize"):
-            raise ValueError(
+            raise GWInputError(
                 f"aggregate contribution direction must be maximize/minimize, got {self.direction!r}")
 
     @classmethod
@@ -1096,10 +1101,10 @@ class AggregateContributionSpec:
         if isinstance(obj, AggregateContributionSpec):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"aggregate contribution must be an object, got {obj!r}")
+            raise GWInputError(f"aggregate contribution must be an object, got {obj!r}")
         missing = [k for k in ("target", "sign", "direction") if k not in obj]
         if missing:
-            raise ValueError(
+            raise GWInputError(
                 "aggregate contribution requires explicit "
                 f"target/sign/direction (missing {missing}); legacy auto-sign is not supported")
         return cls(
@@ -1128,15 +1133,15 @@ class AggregateSpec:
 
     def __post_init__(self) -> None:
         if self.op not in ("max", "min"):
-            raise ValueError(f"aggregate op must be 'max' or 'min', got {self.op!r}")
+            raise GWInputError(f"aggregate op must be 'max' or 'min', got {self.op!r}")
         if not self.expressions:
-            raise ValueError("aggregate requires at least one expression")
+            raise GWInputError("aggregate requires at least one expression")
         for i, terms in enumerate(self.expressions):
             if not terms:
-                raise ValueError(f"aggregate {self.id!r} expression {i} is empty")
+                raise GWInputError(f"aggregate {self.id!r} expression {i} is empty")
             for t in terms:
                 if t.atom.kind not in ("boundary", "const"):
-                    raise ValueError(
+                    raise GWInputError(
                         f"aggregate {self.id!r} only supports boundary/const atoms, "
                         f"got {t.atom.kind!r}")
         for c in self.contributions:
@@ -1148,7 +1153,7 @@ class AggregateSpec:
             else:  # intersection_loss
                 legal = (self.op == "max" and c.sign == 1 and c.direction == "minimize")
             if not legal:
-                raise ValueError(
+                raise GWInputError(
                     f"aggregate {self.id!r} contribution {c.to_obj()} is not exact for op={self.op!r}; "
                     "legal combinations: min+band_objective(+1,maximize), "
                     "min+intersection_reward(+1,maximize), "
@@ -1159,7 +1164,7 @@ class AggregateSpec:
         if isinstance(obj, AggregateSpec):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"aggregate must be an object, got {obj!r}")
+            raise GWInputError(f"aggregate must be an object, got {obj!r}")
         raw_exprs = obj.get("expressions", ())
         expressions = tuple(tuple(LinearTerm.from_obj(t) for t in terms)
                             for terms in raw_exprs)
@@ -1198,7 +1203,7 @@ class ObjectiveConfig:
         if isinstance(obj, ObjectiveConfig):
             return obj
         if "margin_default" in obj:
-            raise ValueError(
+            raise GWInputError(
                 "objective.margin_default was removed; configure margin per green segment "
                 "inside each plan's directions[direction].green_mask")
         return cls(
@@ -1351,7 +1356,7 @@ class ProblemInput:
         for p in self.plans:
             if p.id == plan_id:
                 return p
-        raise KeyError(plan_id)
+        raise GWInputError(f"unknown plan {plan_id!r}", hint="检查 plan id 是否在 plans 中")
 
     def plans_of(self, intersection: str) -> tuple[PlanSpec, ...]:
         return tuple(p for p in self.plans if p.intersection == intersection)
@@ -1365,7 +1370,7 @@ class ProblemInput:
         for d in self.objective.band_demands:
             if d.id == demand_id:
                 return d
-        raise KeyError(demand_id)
+        raise GWInputError(f"unknown demand {demand_id!r}", hint="检查 demand id 是否在 objective.band_demands 中")
 
     def demand_or_none(self, demand_id: str) -> BandDemandSpec | None:
         for d in self.objective.band_demands:

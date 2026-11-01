@@ -21,7 +21,7 @@ from typing import Callable
 import numpy as np
 
 from ..diagnostics.infeasible import InfeasibilityDiagnoser
-from ..errors import GWInfeasibleGridPoint, GWValidationError
+from ..errors import GWInvariantError, GWInfeasibleGridPoint, GWValidationError
 from ..heuristic.greedy import GreedyConstructor, GreedySolution
 from ..model.builder import ModelBuilder
 from ..preprocess.context import GridPointContext
@@ -59,7 +59,10 @@ class GridRunReport:
 
         def score(r: GridPointResult) -> float:
             value = r.composite_best
-            assert value is not None
+            if value is None:
+                raise GWInvariantError(
+                    "GridRunReport.best 遇到 composite_best=None 的结果",
+                    hint="过滤逻辑应已排除 None；请反馈该结果对象。")
             return value
 
         valid.sort(key=score, reverse=True)

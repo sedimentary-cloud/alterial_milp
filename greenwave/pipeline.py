@@ -14,7 +14,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from .errors import GWValidationError
+from .errors import GWInputError, GWValidationError
 from .grid.runner import GridRunner, GridRunReport
 from .pareto.epsilon import EpsilonConstraintScanner
 from .preprocess.feasibility import FeasibilityFilter
@@ -62,7 +62,8 @@ def run_multistage(problem_json: dict[str, Any],
     ``restarts=3``。
     """
     if not isinstance(problem_json, dict):
-        raise TypeError("run_multistage expects a problem JSON object/dict")
+        raise GWInputError("run_multistage expects a problem JSON object/dict",
+                             hint="传入 run()/run_multistage() 的第一个参数必须是 JSON object")
     raw = copy.deepcopy(problem_json)
     if semantics is not None:
         from .semantic import compile_semantics

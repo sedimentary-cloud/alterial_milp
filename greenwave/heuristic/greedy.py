@@ -16,6 +16,8 @@ MILP 求解器虽然能找到最优解，但有时很慢。
 """
 from __future__ import annotations
 
+from ..errors import GWInputError, GWInvariantError
+
 import math
 from dataclasses import dataclass, field, replace
 from typing import Iterable, Mapping
@@ -117,7 +119,8 @@ class GreedyConstructor:
         for iid in self.problem.corridor.intersections:
             plans = self.ctx.feasible_plans.get(iid, ())
             if not plans:
-                raise RuntimeError(f"no feasible plans for {iid}")
+                raise GWInputError(f"no feasible plans for {iid}",
+                               hint="该路口所有方案都被预处理剔除；检查 min_phase_s、hard_constraints 或增加方案")
             best = min(plans, key=lambda p: (self._plan_loss(p), -self._plan_green_score(p), p.id))
             out[iid] = best
         return out
@@ -312,7 +315,10 @@ class GreedyConstructor:
         return out
 
     def _construct_red_bands(self, b: BandDemandSpec, selection, offsets) -> list[ConstructedBand]:
-        assert len(b.nodes) == 2
+        if len(b.nodes) != 2:
+            raise GWInvariantError(
+                f"红波需求 {b.id!r} 的节点数应为 2，实际 {len(b.nodes)}",
+                hint="检查 demand.nodes 配置；红波带只支持相邻对。")
         up_node, down_node = b.nodes
         d = b.direction
         up_plan = selection[up_node]
@@ -376,16 +382,25 @@ class GreedyConstructor:
         for t in c.terms:
             a = t.atom
             if a.kind == "boundary":
-                assert a.direction is not None and a.index is not None
+                if a.direction is None or a.index is None:
+                    raise GWInvariantError(
+                        "boundary atom 缺少 direction/index（应在前置校验拦截）",
+                        hint="检查 AtomRef 的 direction/index 字段。")
                 delta = witness.get((a.direction, a.index), 0.0)
                 val = (plan.nominal_boundary_r(a.direction, a.index) + delta) * self.C
             elif a.kind == "window_duration":
-                assert a.direction is not None and a.window is not None
+                if a.direction is None or a.window is None:
+                    raise GWInvariantError(
+                        "duration atom 缺少 direction/window（应在前置校验拦截）",
+                        hint="检查 AtomRef 的 direction/window 字段。")
                 w = plan.window_edge_span(a.direction, a.window)
                 val = self._edge_duration_s(plan, a.direction, w.start_edge, w.end_edge,
                                             w.wrap, witness)
             elif a.kind == "red_duration":
-                assert a.direction is not None and a.window is not None
+                if a.direction is None or a.window is None:
+                    raise GWInvariantError(
+                        "duration atom 缺少 direction/window（应在前置校验拦截）",
+                        hint="检查 AtomRef 的 direction/window 字段。")
                 reds = plan.derived_red_intervals(a.direction)
                 r = reds[a.window - 1]
                 val = self._edge_duration_s(plan, a.direction, r.start_edge, r.end_edge,
@@ -569,7 +584,10 @@ class GreedyConstructor:
         for iid, plan in selection.items():
             witness = self._witness.get(plan.id, {})
             for c in plan.soft_constraints:
-                assert c.soft is not None
+                if c.soft is None:
+                    raise GWInvariantError(
+                        f"软约束 {c.id!r} 缺少 soft penalty",
+                        hint="hard=false 的约束必须带 soft 字段；检查 schema 校验。")
                 lhs = self._plan_constraint_lhs(plan, c, witness)
                 rhs = c.rhs_for_cycle(self.C)
                 coef = c.soft.coef
@@ -588,7 +606,10 @@ class GreedyConstructor:
                 if viol > 1e-7:
                     return -1e18, soft_loss - soft_reward, reward
             else:
-                assert c.soft is not None
+                if c.soft is None:
+                    raise GWInvariantError(
+                        f"软约束 {c.id!r} 缺少 soft penalty",
+                        hint="hard=false 的约束必须带 soft 字段；检查 schema 校验。")
                 if c.soft.owner == "intersection_reward":
                     soft_reward += c.soft.coef * self._reward_from_lhs(lhs, c.sense, rhs)
                 elif c.soft.owner == "intersection_loss":

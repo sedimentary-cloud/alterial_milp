@@ -14,6 +14,7 @@ import sys
 # Make the project importable when this file is executed directly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from greenwave.errors import GWInvariantError, GWSolveError
 from greenwave.model.builder import ModelBuilder  # noqa: E402
 from greenwave.preprocess.feasibility import FeasibilityFilter  # noqa: E402
 from greenwave.report import TimeSpaceDiagram, SolutionDecoder  # noqa: E402
@@ -42,7 +43,10 @@ def _dir(boundaries, green_mask, adjust=None) -> dict:
     adjust: optional {boundary_index: [lo, hi]}.
     """
     boundaries = list(boundaries)
-    assert len(green_mask) == len(boundaries) + 1
+    if len(green_mask) != len(boundaries) + 1:
+        raise GWInvariantError(
+            "绿波示例的 green_mask 长度与 boundaries 不匹配",
+            hint="green_mask 长度必须为 boundaries 数量 + 1")
     out = []
     for i, pos in enumerate(boundaries):
         item = {"pos_r": float(pos)}
@@ -84,8 +88,10 @@ def solve_solution(problem_dict: dict, cycle: float, kappa: float = 1.0):
     result = backend.solve(session, SolveOptions(problem.solver.time_limit_s,
                                                  problem.solver.mip_rel_gap))
     if result.values is None:
-        raise RuntimeError(f"no solution for case {problem.corridor.corridor_id}: "
-                           f"{result.status} {result.message}")
+        raise GWSolveError(
+            f"no solution for case {problem.corridor.corridor_id}: "
+            f"{result.status} {result.message}",
+            hint="检查该案例的 hard_constraints / 求解时间；可单独运行该案例排查")
     return problem, ctx, SolutionDecoder(model).decode(result.values)
 
 

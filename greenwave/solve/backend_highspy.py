@@ -50,7 +50,8 @@ class HighspyBackend(SolverBackend[HighspySession]):
 
     def create(self, model: ArterialModel) -> HighspySession:
         if highspy is None:
-            raise GWSolveError("highspy is not installed")
+            raise GWSolveError("highspy is not installed",
+                               hint="安装 highspy（pip install highspy），或把 solver.backend 改成 'scipy'")
         return HighspySession(model=model, objective=model.objective,
                               objective_sense=model.objective_sense)
 

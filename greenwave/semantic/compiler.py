@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from dataclasses import replace
 
-from ..errors import GWSemanticError
+from ..errors import GWInvariantError, GWSemanticError
 from ..schema.models import (AtomRef, ConstraintSpec, LinearTerm, PlanSpec,
                              ProblemInput, SoftPenalty)
 from .ledger import describe_red_ledger, red_ledger
@@ -99,7 +99,10 @@ def _endpoint_linear_terms(plan: PlanSpec, d: str, k_eff: int, side: str,
 
 def _compile_cycle_lock(rule: SemanticRule, problem: ProblemInput,
                         plans: dict[str, PlanSpec], report: dict) -> None:
-    assert rule.target is not None
+    if rule.target is None:
+        raise GWInvariantError(
+            f"semantic rule {rule.id!r} 缺少 target（应在前置校验拦截）",
+            hint="duration_limit/sync 规则必须带 target；检查 semantic schema。")
     target = rule.target
     if target.window.kind != "green":
         raise _fail(rule, "green_at_cycle_start/end requires a green window", target)
@@ -163,7 +166,10 @@ def _compile_sync(rule: SemanticRule, problem: ProblemInput,
 
 def _compile_duration_limit(rule: SemanticRule, problem: ProblemInput,
                             plans: dict[str, PlanSpec], report: dict) -> None:
-    assert rule.target is not None
+    if rule.target is None:
+        raise GWInvariantError(
+            f"semantic rule {rule.id!r} 缺少 target（应在前置校验拦截）",
+            hint="duration_limit/sync 规则必须带 target；检查 semantic schema。")
     target = rule.target
     if rule.sense not in ("<=", ">="):
         raise _fail(rule, "duration_limit sense must be '<=' or '>='", target)

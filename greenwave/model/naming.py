@@ -20,6 +20,8 @@
 """
 from __future__ import annotations
 
+from ..errors import GWModelError
+
 from typing import Final
 
 # ---------------------------------------------------------------------------
@@ -233,7 +235,8 @@ def edge_name(demand: str, slot: int, node: str, win_slot: int, side: str) -> st
         return gw_edge_lo(demand, slot, node, win_slot)
     if side in ("hi", "e"):
         return gw_edge_hi(demand, slot, node, win_slot)
-    raise ValueError(f"unknown edge side {side!r}")
+    raise GWModelError(f"unknown edge side {side!r}",
+                              hint="side 必须是 'lo'/'s' 或 'hi'/'e'")
 
 
 def margin_name(demand: str, slot: int, node: str, win_slot: int, side: str,
@@ -247,7 +250,8 @@ def margin_name(demand: str, slot: int, node: str, win_slot: int, side: str,
         return gw_margin_lo(demand, slot, node, win_slot, plan)
     if side in ("hi", "e"):
         return gw_margin_hi(demand, slot, node, win_slot, plan)
-    raise ValueError(f"unknown margin side {side!r}")
+    raise GWModelError(f"unknown margin side {side!r}",
+                              hint="margin side 必须是 'start' 或 'end'")
 
 
 # ---------------------------------------------------------------------------

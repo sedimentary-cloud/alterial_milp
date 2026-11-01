@@ -20,6 +20,8 @@
 """
 from __future__ import annotations
 
+from ..errors import GWInputError
+
 import math
 import os
 
@@ -68,12 +70,13 @@ class GridHeatmapDiagram:
                dpi: int = 160) -> None:
         rows = _extract_rows(result)
         if not rows:
-            raise ValueError("no grid results to plot")
+            raise GWInputError("no grid results to plot", hint="先运行 run() 得到 grid_results，再画热力图")
 
         cycles = sorted({float(r["cycle_s"]) for r in rows})
         kappas = sorted({float(r["speed_ratio"]) for r in rows})
         if not cycles or not kappas:
-            raise ValueError("grid results contain no cycle/speed-ratio values")
+            raise GWInputError("grid results contain no cycle/speed-ratio values",
+                              hint="检查输入 grid.cycles_s / speed_ratios，以及每个格点是否带有 cycle_s/kappa")
 
         # 先把 (C, κ) -> row 做成字典，方便填矩阵。
         by_key = {(float(r["cycle_s"]), float(r["speed_ratio"])): r for r in rows}

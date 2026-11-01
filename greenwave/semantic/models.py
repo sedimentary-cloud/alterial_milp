@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from ..errors import GWInputError
+
 from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping
 
@@ -19,12 +21,12 @@ def _num(value: Any, name: str) -> float:
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be numeric, got {value!r}") from exc
+        raise GWInputError(f"{name} must be numeric, got {value!r}") from exc
 
 
 def _direction(value: Any) -> Direction:
     if value not in ("up", "down"):
-        raise ValueError(f"direction must be 'up' or 'down', got {value!r}")
+        raise GWInputError(f"direction must be 'up' or 'down', got {value!r}")
     return value  # type: ignore[return-value]
 
 
@@ -40,37 +42,37 @@ class WindowRef:
         if isinstance(obj, WindowRef):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"window reference must be an object, got {obj!r}")
+            raise GWInputError(f"window reference must be an object, got {obj!r}")
         kind = obj.get("kind")
         if kind not in ("green", "red"):
-            raise ValueError("window.kind must be 'green' or 'red'")
+            raise GWInputError("window.kind must be 'green' or 'red'")
         if kind == "green":
             has_index = obj.get("index") is not None
             has_pos = obj.get("position") is not None
             if has_index == has_pos:
-                raise ValueError("green window requires exactly one of index/position")
+                raise GWInputError("green window requires exactly one of index/position")
             if has_index:
                 idx = int(obj["index"])
                 if idx < 0:
-                    raise ValueError("green window index must be >= 0")
+                    raise GWInputError("green window index must be >= 0")
                 return cls("green", index=idx)
             pos = str(obj["position"])
             if pos not in ("first", "last"):
-                raise ValueError("green window position must be 'first' or 'last'")
+                raise GWInputError("green window position must be 'first' or 'last'")
             return cls("green", position=pos)
         # red
         has_index = obj.get("index") is not None
         has_after = obj.get("after_green") is not None
         if has_index == has_after:
-            raise ValueError("red window requires exactly one of index/after_green")
+            raise GWInputError("red window requires exactly one of index/after_green")
         if has_index:
             idx = int(obj["index"])
             if idx < 1:
-                raise ValueError("red window index must be >= 1")
+                raise GWInputError("red window index must be >= 1")
             return cls("red", index=idx)
         after = int(obj["after_green"])
         if after < 1:
-            raise ValueError("red window after_green must be >= 1")
+            raise GWInputError("red window after_green must be >= 1")
         return cls("red", after_green=after)
 
 
@@ -86,7 +88,7 @@ class Target:
         if isinstance(obj, Target):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"target must be an object, got {obj!r}")
+            raise GWInputError(f"target must be an object, got {obj!r}")
         return cls(
             intersection=str(obj["intersection"]),
             plan=str(obj["plan"]),
@@ -113,7 +115,7 @@ class SemanticRule:
         if isinstance(obj, SemanticRule):
             return obj
         if not isinstance(obj, Mapping):
-            raise ValueError(f"semantic rule must be an object, got {obj!r}")
+            raise GWInputError(f"semantic rule must be an object, got {obj!r}")
         raw_targets = tuple(Target.from_obj(t) for t in obj.get("targets", ()) or ())
         target = Target.from_obj(obj["target"]) if obj.get("target") is not None else None
         penalty_obj = obj.get("penalty")
@@ -144,7 +146,7 @@ class SemanticInput:
         elif isinstance(obj, (list, tuple)):
             raw = obj
         else:
-            raise ValueError("semantic input must be a list or an object with semantic_rules")
+            raise GWInputError("semantic input must be a list or an object with semantic_rules")
         return cls(tuple(SemanticRule.from_obj(r) for r in raw))
 
 

@@ -50,6 +50,17 @@ print(result["grid_results"])
 print(result["pareto"]["points"][0]["solution"]["bands"])
 ```
 
+所有主动错误统一带 `code`、原因和建议，例如：
+
+```text
+[GW-INPUT] boundary atom missing fields: ['direction']
+可能原因：输入 JSON 不符合 schema：字段缺失、类型/取值范围不对，或引用了不存在的对象。
+建议：对照报错中的字段/对象名检查配置；字段规则见 docs/配置手册与数学原理.md。
+```
+
+错误编号与排查表见
+[配置手册 §17.1](docs/配置手册与数学原理.md#171-统一错误格式与编号)。
+
 ### 多阶段快速优化（可选）
 
 原完整 MILP 接口保持不变。若需要更快的工程启发式，可显式调用：
