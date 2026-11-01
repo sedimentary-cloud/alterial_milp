@@ -1316,6 +1316,8 @@ loss_s（兼容名）            = intersection_cost_s
 * 只有 `target=band_objective` 的聚合会进入阶段 1 的 composite，从而使多阶段
   语义分解回退完整 MILP；`intersection_reward/loss` 的聚合在阶段 1 不可见，
   仍可走多阶段语义分解（子问题丢弃聚合、拼装完整解时补出 `t`）。
+* 每个字段最终进哪个账本的完整对照表（含默认值、报告字段、阶段可见性）见
+  《配置手册与数学原理》§6.7“目标账本”。
 
 ---
 

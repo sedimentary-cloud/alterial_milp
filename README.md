@@ -198,6 +198,9 @@ tests/
   支持“最大化最小时长”这类均衡目标；
 - 路口分数：`R_int − L_int`，其中软约束 owner 可为 `intersection_reward`
   （超额满足量奖励）或 `intersection_loss`（违反量损失），与带分数一起做 Pareto；
+- 四个账本（band reward / band loss / intersection reward / intersection loss）的
+  配置入口、默认值与报告字段见
+  [配置手册 §6.7「目标账本」](docs/配置手册与数学原理.md)；
 - 全局硬约束（上行带宽 >= 15s）；
 - 全局软约束（上行带宽尽量 >= 20s）；
 - 中间路口可调绿灯结束点，首末路口只调周期偏置；

@@ -626,6 +626,7 @@ C     = L_int − R_int = −I
 - 单位统一为秒；margin 短缺与软罚的系数无量纲；
 - 簿记规则：**margin 类罚项全部归 composite**（已锁定）；方案内端点软约束按 owner 归 `band_loss` / `R_int` / `L_int`；用户全局软约束与聚合贡献按声明的 owner 归集；
 - `I` 可以因为奖励大于损失而为正，`C` 可以为负；报告同时给 `intersection_reward_s` / `intersection_loss_s` / `intersection_composite_s` / `intersection_cost_s`。
+- 各配置入口（含默认隐式项）与报告字段的完整对照见配置手册 §6.7“目标账本”。
 
 ### 4.5 两阶段求解
 
