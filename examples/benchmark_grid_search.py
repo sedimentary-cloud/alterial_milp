@@ -187,7 +187,7 @@ def solve_point(problem, cycle_s: float, kappa: float, *,
         rec["ts"] = ts_canvas.draw_payload(sol, _TS_CTX[0])
         rec.update(
             composite_s=float(sol.composite_s),
-            reward_s=float(sol.band_reward_s),
+            reward_s=float(sol.bandwidth_reward_s),
             balanced_z_s=float(sol.balanced_groups.get("BG_up_down_global", 0.0)),
             beta_up_s=float(beta_up),
             beta_down_s=float(beta_down),

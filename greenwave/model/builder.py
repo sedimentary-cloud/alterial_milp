@@ -1547,6 +1547,8 @@ class ModelBuilder:
                                         row = LinearExpr.of(var, 1.0).add(u[q], 1.0)
                                         row.add(beta[q], 1.0).add(phi, -1.0).add(ew, -1.0)
                                         row.add(nv, -self.C).add(av, -M)
+                                        # gap_end = (φ+e+nC) − (u+T+β)，T 是到本节点的累计行程。
+                                        row.add_const(table.cum_T_s[j])
                                         self.cons.add(row, ">=", -spec.free_s - M,
                                                       ConstraintMeta("C8_EDGE",
                                                                      f"green edge end {b.id}/{q}/{node}/{k}",

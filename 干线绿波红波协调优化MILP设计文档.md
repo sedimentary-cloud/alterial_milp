@@ -625,7 +625,7 @@ C     = L_int − R_int = −I
 
 - 单位统一为秒；margin 短缺与软罚的系数无量纲；
 - 簿记规则：**margin 类罚项全部归 composite**（已锁定）；方案内端点软约束按 owner 归 `band_loss` / `R_int` / `L_int`；用户全局软约束与聚合贡献按声明的 owner 归集；
-- `I` 可以因为奖励大于损失而为正，`C` 可以为负；报告同时给 `intersection_reward_s` / `intersection_loss_s` / `intersection_composite_s` / `intersection_cost_s`。
+- `I` 可以因为奖励大于损失而为正，`C` 可以为负；报告统一给嵌套 `score.band` / `score.intersection`（详见配置手册 §6.7）。
 - 各配置入口（含默认隐式项）与报告字段的完整对照见配置手册 §6.7“目标账本”。
 
 ### 4.5 两阶段求解
@@ -821,11 +821,16 @@ scipy 无法获取 IIS。提供「分块软化」调试器：按约束组（C1�
     "points": [
       {
         "epsilon": 0.0,
-        "composite_actual": 42.5,
-        "intersection_reward": 6.0,
-        "intersection_loss": 18.0,
-        "intersection_composite": -12.0,
-        "intersection_cost": 12.0,
+        "score": {
+          "band": {"reward_s": 63.0, "loss_s": 27.9, "composite_s": 35.1,
+                   "reward_breakdown": {"bandwidth": 45.0, "balanced": 0.0, "aggregate": 18.0},
+                   "loss_breakdown": {"margin": 0.0, "green_edge": 0.9, "red_edge": 0.0,
+                                      "soft": 9.0, "balanced_min_existing": 0.0, "aggregate": 18.0}},
+          "intersection": {"reward_s": 27.0, "loss_s": 40.5, "composite_s": -13.5,
+                           "cost_s": 13.5,
+                           "reward_breakdown": {"soft": 9.0, "aggregate": 18.0},
+                           "loss_breakdown": {"soft": 18.0, "aggregate": 22.5}}
+        },
         "solution": {
           "plan_selection": {"I1": "I1_P2", "I2": "I2_P1"},
           "offsets_s": {"I1": 0.0, "I2": 33.5},
@@ -836,10 +841,18 @@ scipy 无法获取 IIS。提供「分块软化」调试器：按约束组（C1�
              "windows": {"I1": 1, "I2": 2}}
           ],
           "constraint_violations": [{"id": "c7", "violation_s": 3.0, "cost": 15.0, "owner": "band_loss"}],
-          "intersection_reward_s": 6.0,
-          "intersection_loss_s": 18.0,
-          "intersection_composite_s": -12.0,
-          "intersection_cost_s": 12.0
+          "score": {
+            "band": {"reward_s": 63.0, "loss_s": 27.9, "composite_s": 35.1,
+                     "reward_breakdown": {"bandwidth": 45.0, "balanced": 0.0, "aggregate": 18.0},
+                     "loss_breakdown": {"margin": 0.0, "green_edge": 0.9, "red_edge": 0.0,
+                                        "soft": 9.0, "balanced_min_existing": 0.0, "aggregate": 18.0}},
+            "intersection": {"reward_s": 27.0, "loss_s": 40.5, "composite_s": -13.5,
+                             "cost_s": 13.5,
+                             "reward_breakdown": {"soft": 9.0, "aggregate": 18.0},
+                             "loss_breakdown": {"soft": 18.0, "aggregate": 22.5}}
+          },
+          "composite_s": 35.1,
+          "loss_s": 13.5
         }
       }
     ]
@@ -1332,12 +1345,7 @@ class GridRunReport:
 @dataclass(frozen=True)
 class ParetoPoint:
     epsilon_s: float
-    composite_actual_s: float        # 用解向量重算的实际值，不取下界（4.5）
-    intersection_reward_s: float
-    intersection_loss_s: float       # 原始损失 L_int
-    intersection_composite_s: float  # R_int − L_int（第二目标）
-    intersection_cost_s: float       # L_int − R_int（Pareto 内部最小化）
-    solution: "SolutionRecord"
+    solution: "SolutionRecord"      # solution.band / solution.intersection 是四账本
 
 class EpsilonConstraintScanner:
     def __init__(self, problem: ProblemInput, ctx: GridPointContext,
@@ -1376,14 +1384,21 @@ class ViolationRecord:
     owner: str
 
 @dataclass(frozen=True)
+class ScoreLedger:
+    reward_s: float
+    loss_s: float
+    reward_breakdown: dict[str, float]
+    loss_breakdown: dict[str, float]
+    # composite_s = reward_s - loss_s；cost_s = loss_s - reward_s
+
 class SolutionRecord:
     plan_selection: dict[str, str]
     offsets_s: dict[str, float]
     adjustments_r: dict[tuple[str, Direction, int, Side], float]
     bands: tuple[ConstructedBand, ...]
     violations: tuple[ViolationRecord, ...]
-    composite_s: float
-    loss_s: float
+    band: ScoreLedger
+    intersection: ScoreLedger
 
 class SolutionDecoder:
     """仅用 ArterialModel 访问器 + meta 解码，不触碰求解器对象。"""

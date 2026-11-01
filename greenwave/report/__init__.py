@@ -1,6 +1,7 @@
 from .solution import *  # noqa: F401,F403
 
-__all__ = ["ViolationRecord", "SolutionRecord", "SolutionDecoder", "ReportBuilder",
+__all__ = ["ViolationRecord", "ScoreLedger", "SolutionRecord",
+           "SolutionDecoder", "ReportBuilder",
            "TimeSpaceDiagram", "ParetoFrontierDiagram", "GridHeatmapDiagram"]
 
 

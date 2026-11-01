@@ -174,10 +174,10 @@ class TestAggregateMilp(unittest.TestCase):
         sol = out["pareto"]["points"][0]["solution"]
         self.assertEqual(grid["status"], "optimal")
         # β = 45（I1 窗 54、I2 窗 45）；min 相位 = 18；composite = 45 + 2×18 = 81。
-        self.assertAlmostEqual(grid["bandwidth_objective_s"], 45.0, places=3)
+        self.assertAlmostEqual(grid["score"]["band"]["reward_breakdown"]["bandwidth"], 45.0, places=3)
         self.assertAlmostEqual(sol["aggregates"]["min_phase"], 18.0, places=3)
         self.assertAlmostEqual(grid["composite_best"], 81.0, places=3)
-        self.assertAlmostEqual(out["pareto"]["points"][0]["composite_actual"], 81.0, places=3)
+        self.assertAlmostEqual(out["pareto"]["points"][0]["score"]["band"]["composite_s"], 81.0, places=3)
 
     def test_min_aggregate_reward_offsets_intersection_loss(self):
         # 可调边界 → 聚合不是常数，验证路口分数 R−L 把 t 推到 min(相位)。
@@ -360,14 +360,14 @@ class TestIntersectionScore(unittest.TestCase):
         out = run(_problem(plans, []))
         sol = out["pareto"]["points"][0]["solution"]
         # I1 b0=18 → reward 18−9=9；I2 b0=45 → loss 45−27=18。
-        self.assertAlmostEqual(sol["intersection_reward_s"], 9.0, places=4)
-        self.assertAlmostEqual(sol["intersection_loss_s"], 18.0, places=4)
-        self.assertAlmostEqual(sol["intersection_composite_s"], -9.0, places=4)
-        self.assertAlmostEqual(sol["intersection_cost_s"], 9.0, places=4)
+        self.assertAlmostEqual(sol["score"]["intersection"]["reward_s"], 9.0, places=4)
+        self.assertAlmostEqual(sol["score"]["intersection"]["loss_s"], 18.0, places=4)
+        self.assertAlmostEqual(sol["score"]["intersection"]["composite_s"], -9.0, places=4)
+        self.assertAlmostEqual(sol["score"]["intersection"]["cost_s"], 9.0, places=4)
         self.assertAlmostEqual(sol["loss_s"], 9.0, places=4)
         point = out["pareto"]["points"][0]
-        self.assertAlmostEqual(point["intersection_composite"], -9.0, places=4)
-        self.assertAlmostEqual(point["intersection_cost"], 9.0, places=4)
+        self.assertAlmostEqual(point["score"]["intersection"]["composite_s"], -9.0, places=4)
+        self.assertAlmostEqual(point["score"]["intersection"]["cost_s"], 9.0, places=4)
 
     def test_reward_gated_by_plan_selection(self):
         soft_a = [{"id": "a_reward",
@@ -382,8 +382,8 @@ class TestIntersectionScore(unittest.TestCase):
         out = run(_problem(plans, []))
         sol = out["pareto"]["points"][0]["solution"]
         self.assertEqual(sol["plan_selection"]["I1"], "I1_B")
-        self.assertAlmostEqual(sol["intersection_reward_s"], 0.0, places=6)
-        self.assertAlmostEqual(sol["intersection_composite_s"], 0.0, places=6)
+        self.assertAlmostEqual(sol["score"]["intersection"]["reward_s"], 0.0, places=6)
+        self.assertAlmostEqual(sol["score"]["intersection"]["composite_s"], 0.0, places=6)
 
     def test_global_reward_constraint(self):
         plan_i1 = _plan("I1_P1", "I1", [0.2], [True, False])
@@ -397,7 +397,7 @@ class TestIntersectionScore(unittest.TestCase):
         }]
         out = run(raw)
         sol = out["pareto"]["points"][0]["solution"]
-        self.assertAlmostEqual(sol["intersection_reward_s"], sol["band_reward_s"], places=4)
+        self.assertAlmostEqual(sol["score"]["intersection"]["reward_s"], sol["score"]["band"]["reward_breakdown"]["bandwidth"], places=4)
 
     def test_reward_owner_validation(self):
         from greenwave.schema.models import SoftPenalty

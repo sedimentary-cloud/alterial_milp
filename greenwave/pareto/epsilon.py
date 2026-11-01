@@ -25,15 +25,10 @@ from ..report.solution import SolutionDecoder, SolutionRecord
 from ..solve.backend_base import SolveOptions, SolveStatus
 
 
-# 一个 Pareto 点：ε、带分数、路口 R/L/分数/成本、完整方案。
+# 一个 Pareto 点：ε + 完整方案；两个账本都在 solution.band / solution.intersection。
 @dataclass(frozen=True)
 class ParetoPoint:
     epsilon_s: float
-    composite_actual_s: float
-    intersection_reward_s: float
-    intersection_loss_s: float
-    intersection_composite_s: float
-    intersection_cost_s: float
     solution: SolutionRecord
 
 
@@ -103,15 +98,7 @@ class EpsilonConstraintScanner:
             else:
                 # 第二阶段失败时回退到第一阶段可行点，至少保留一个已求出的点。
                 sol = sol1
-            points.append(ParetoPoint(
-                epsilon_s=float(eps),
-                composite_actual_s=float(sol.composite_s),
-                intersection_reward_s=float(sol.intersection_reward_s),
-                intersection_loss_s=float(sol.intersection_loss_s),
-                intersection_composite_s=float(sol.intersection_composite_s),
-                intersection_cost_s=float(sol.intersection_cost_s),
-                solution=sol,
-            ))
+            points.append(ParetoPoint(epsilon_s=float(eps), solution=sol))
         return ParetoFront(points, base_grid=base)
 
 

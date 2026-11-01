@@ -123,9 +123,9 @@ class TestGreenMaskMarginMilp(unittest.TestCase):
         grid = out["grid_results"][0]
         sol = out["pareto"]["points"][0]["solution"]
         self.assertEqual(grid["status"], "optimal")
-        self.assertAlmostEqual(grid["bandwidth_objective_s"], 45.0, places=3)
+        self.assertAlmostEqual(grid["score"]["band"]["reward_breakdown"]["bandwidth"], 45.0, places=3)
         # 带宽满窗 → 两个节点 × 两侧各缺 3s，罚 4 × 3 × 0.2 = 2.4。
-        self.assertAlmostEqual(sol["margin_loss_s"], 2.4, places=3)
+        self.assertAlmostEqual(sol["score"]["band"]["loss_breakdown"]["margin"], 2.4, places=3)
         self.assertAlmostEqual(grid["composite_best"], 42.6, places=3)
 
     def test_hard_margin_caps_bandwidth(self):
@@ -138,8 +138,8 @@ class TestGreenMaskMarginMilp(unittest.TestCase):
         out = self._solve(plans)
         grid = out["grid_results"][0]
         sol = out["pareto"]["points"][0]["solution"]
-        self.assertAlmostEqual(grid["bandwidth_objective_s"], 39.0, places=3)
-        self.assertAlmostEqual(sol["margin_loss_s"], 0.0, places=4)
+        self.assertAlmostEqual(grid["score"]["band"]["reward_breakdown"]["bandwidth"], 39.0, places=3)
+        self.assertAlmostEqual(sol["score"]["band"]["loss_breakdown"]["margin"], 0.0, places=4)
 
     def test_hard_margin_makes_case_infeasible(self):
         w = (20.0 / CYCLE,)

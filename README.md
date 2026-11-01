@@ -201,6 +201,8 @@ tests/
 - 四个账本（band reward / band loss / intersection reward / intersection loss）的
   配置入口、默认值与报告字段见
   [配置手册 §6.7「目标账本」](docs/配置手册与数学原理.md)；
+- 结果 JSON 的分数统一放在 `score.band` / `score.intersection`（含 breakdown），
+  顶层只保留 `composite_s` / `loss_s` 两个别名；
 - 全局硬约束（上行带宽 >= 15s）；
 - 全局软约束（上行带宽尽量 >= 20s）；
 - 中间路口可调绿灯结束点，首末路口只调周期偏置；

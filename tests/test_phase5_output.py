@@ -44,7 +44,7 @@ class TestOutputV2(unittest.TestCase):
         self.assertIn("boundaries", sol)
         self.assertIn("derived_windows", sol)
         self.assertIn("adjustments", sol)
-        self.assertAlmostEqual(sol["band_reward_s"], 40.5, places=4)
+        self.assertAlmostEqual(sol["score"]["band"]["reward_breakdown"]["bandwidth"], 40.5, places=4)
         # window for I1 up should be [0, 0.45]
         arr = sol["derived_windows"]["I1_P1.up"]
         self.assertEqual(len(arr), 1)

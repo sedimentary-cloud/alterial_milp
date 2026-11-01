@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 import numpy as np
@@ -26,7 +26,7 @@ from ..heuristic.greedy import GreedyConstructor, GreedySolution
 from ..model.builder import ModelBuilder
 from ..preprocess.context import GridPointContext
 from ..preprocess.feasibility import FeasibilityFilter
-from ..report.solution import SolutionDecoder, SolutionRecord
+from ..report.solution import ScoreLedger, SolutionDecoder, SolutionRecord
 from ..schema.models import ProblemInput, SolverConfig
 from ..solve import make_backend
 from ..solve.backend_base import SolveOptions, SolveStatus
@@ -45,12 +45,8 @@ class GridPointResult:
     time_s: float = 0.0
     message: str = ""
     ctx: GridPointContext | None = None
-    band_reward_s: float | None = None
-    margin_loss_s: float | None = None
-    intersection_loss_s: float | None = None
-    intersection_reward_s: float | None = None
-    intersection_composite_s: float | None = None
-    green_edge_loss_s: float | None = None
+    band: ScoreLedger | None = None
+    intersection: ScoreLedger | None = None
 
 
 # 所有格点的汇总报告。
@@ -114,12 +110,8 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
             time_s=fallback.time_s,
             message=msg,
             ctx=fallback.ctx,
-            band_reward_s=fallback.band_reward_s,
-            margin_loss_s=fallback.margin_loss_s,
-            intersection_loss_s=fallback.intersection_loss_s,
-            intersection_reward_s=fallback.intersection_reward_s,
-            intersection_composite_s=fallback.intersection_composite_s,
-            green_edge_loss_s=fallback.green_edge_loss_s,
+            band=fallback.band,
+            intersection=fallback.intersection,
         )
 
     if ms.solution is None and solver_cfg.multistage.fallback_to_full_milp:
@@ -137,12 +129,8 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
             time_s=ms.time_s + fallback.time_s,
             message=msg,
             ctx=fallback.ctx,
-            band_reward_s=fallback.band_reward_s,
-            margin_loss_s=fallback.margin_loss_s,
-            intersection_loss_s=fallback.intersection_loss_s,
-            intersection_reward_s=fallback.intersection_reward_s,
-            intersection_composite_s=fallback.intersection_composite_s,
-            green_edge_loss_s=fallback.green_edge_loss_s,
+            band=fallback.band,
+            intersection=fallback.intersection,
         )
     solution = ms.solution
     return GridPointResult(
@@ -156,12 +144,8 @@ def _solve_stage1_multistage(problem: ProblemInput, ctx: GridPointContext,
         time_s=ms.time_s,
         message=ms.message,
         ctx=ctx,
-        band_reward_s=None if solution is None else solution.band_reward_s,
-        margin_loss_s=None if solution is None else solution.margin_loss_s,
-        intersection_loss_s=None if solution is None else solution.intersection_loss_s,
-        intersection_reward_s=None if solution is None else solution.intersection_reward_s,
-        intersection_composite_s=None if solution is None else solution.intersection_composite_s,
-        green_edge_loss_s=None if solution is None else solution.green_edge_loss_s,
+        band=None if solution is None else solution.band,
+        intersection=None if solution is None else solution.intersection,
     )
 
 
@@ -201,12 +185,8 @@ def _solve_stage1_full_milp(problem: ProblemInput, ctx: GridPointContext,
         time_s=res.time_s,
         message=message,
         ctx=ctx,
-        band_reward_s=None if solution is None else solution.band_reward_s,
-        margin_loss_s=None if solution is None else solution.margin_loss_s,
-        intersection_loss_s=None if solution is None else solution.intersection_loss_s,
-        intersection_reward_s=None if solution is None else solution.intersection_reward_s,
-        intersection_composite_s=None if solution is None else solution.intersection_composite_s,
-        green_edge_loss_s=None if solution is None else solution.green_edge_loss_s,
+        band=None if solution is None else solution.band,
+        intersection=None if solution is None else solution.intersection,
     )
 
 
@@ -268,10 +248,7 @@ class GridRunner:
         for r in results:
             g = heur_map.get((r.cycle_s, r.kappa))
             if g is not None:
-                r = GridPointResult(r.cycle_s, r.kappa, r.status, r.composite_best,
-                                    g, r.solution, r.dropped, r.time_s, r.message, r.ctx,
-                                    r.band_reward_s, r.margin_loss_s, r.intersection_loss_s,
-                                    r.green_edge_loss_s)
+                r = replace(r, heuristic=g)
             results2.append(r)
         return GridRunReport(tuple(results2 + skipped))
 

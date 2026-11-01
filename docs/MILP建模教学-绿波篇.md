@@ -1298,13 +1298,25 @@ min: t ≤ e_i + M(1−x_p)
 
 **报告**：
 
+```json
+"score": {
+  "band": {
+    "reward_s": ..., "loss_s": ..., "composite_s": ...,
+    "reward_breakdown": {"bandwidth": ..., "balanced": ..., "aggregate": ...},
+    "loss_breakdown": {"margin": ..., "green_edge": ..., "red_edge": ...,
+                       "soft": ..., "balanced_min_existing": ..., "aggregate": ...}
+  },
+  "intersection": {
+    "reward_s": R_int, "loss_s": L_int,
+    "composite_s": R_int − L_int, "cost_s": L_int − R_int,
+    "reward_breakdown": {"soft": ..., "aggregate": ...},
+    "loss_breakdown": {"soft": ..., "aggregate": ...}
+  }
+}
 ```
-intersection_reward_s      = R_int
-intersection_loss_s        = L_int（原始损失）
-intersection_composite_s   = R_int − L_int
-intersection_cost_s        = L_int − R_int
-loss_s（兼容名）            = intersection_cost_s
-```
+
+`solution` 顶层只保留 `composite_s`（=`score.band.composite_s`）和
+`loss_s`（=`score.intersection.cost_s`）两个别名。
 
 `aggregates` 给出每个聚合在选中方案下的真实值（未选中为 0）。
 
@@ -1726,7 +1738,7 @@ gap_end   = (φ_up + ê_g + τ) − (u + β)    ← 红带终点比上游绿窗�
 | `σ^e` | `gw_edge_lo/hi[...]`, `rw_edge_start/end[...]` | 连续 ≥0 | 边界亲和超出 `free_s` 的部分 |
 | `t_a` | `agg[...]` | 连续 | 具名聚合值（min 的上包络 / max 的下包络）；未选中方案时为 0 |
 | `free_s` / `hard_max_s` | `EdgeSpec` | 常数 | 边界亲和的免费额度 / 硬上限 |
-| `green_edge_loss_s` | `SolutionRecord.green_edge_loss_s` | 秒 | 报告字段：绿波贴合损失，解码时按几何位置重算 |
+| `green_edge_loss_s` | `SolutionRecord.green_edge_loss_s` | 秒 | 兼容 property；报告里在 `score.band.loss_breakdown.green_edge`，解码时按几何位置重算 |
 
 ## 附录 B：代码索引
 

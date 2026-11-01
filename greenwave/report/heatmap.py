@@ -119,20 +119,22 @@ def _extract_rows(result) -> list[dict]:
             rows.append(_ensure_ratio_fields(dict(item)))
         else:
             cycle = getattr(item, "cycle_s", None)
-            band = getattr(item, "band_reward_s", None)
-            margin = getattr(item, "margin_loss_s", None)
-            loss = getattr(item, "intersection_loss_s", None)
+            band = getattr(item, "band", None)
+            inter = getattr(item, "intersection", None)
             composite = getattr(item, "composite_best", None)
+            bandwidth = None if band is None else band.reward_breakdown.get("bandwidth")
+            margin = None if band is None else band.loss_breakdown.get("margin")
+            loss = None if inter is None else inter.loss_s
             rows.append({
                 "cycle_s": cycle,
                 "speed_ratio": getattr(item, "kappa", None),
                 "status": getattr(item, "status", None),
-                "bandwidth_objective_s": band,
+                "bandwidth_objective_s": bandwidth,
                 "negative_margin_loss_s": None if margin is None else -float(margin),
                 "negative_intersection_loss_s": None if loss is None else -float(loss),
                 "composite_objective_s": composite,
                 "bandwidth_objective_ratio": (
-                    None if band is None or not cycle else float(band) / float(cycle)),
+                    None if bandwidth is None or not cycle else float(bandwidth) / float(cycle)),
                 "negative_margin_loss_ratio": (
                     None if margin is None or not cycle else -float(margin) / float(cycle)),
                 "negative_intersection_loss_ratio": (
@@ -145,6 +147,17 @@ def _extract_rows(result) -> list[dict]:
 
 def _ensure_ratio_fields(row: dict) -> dict:
     """如果只有绝对秒数，就补齐除以周期的归一化字段。"""
+    score = row.get("score") or {}
+    band = score.get("band") or {}
+    inter = score.get("intersection") or {}
+    if band:
+        row.setdefault("bandwidth_objective_s",
+                       (band.get("reward_breakdown") or {}).get("bandwidth"))
+        margin = (band.get("loss_breakdown") or {}).get("margin")
+        if margin is not None:
+            row["negative_margin_loss_s"] = -float(margin)
+    if inter and inter.get("loss_s") is not None:
+        row["negative_intersection_loss_s"] = -float(inter["loss_s"])
     cycle = float(row.get("cycle_s") or 0.0)
     if row.get("composite_objective_s") is None and row.get("composite_best") is not None:
         row["composite_objective_s"] = row["composite_best"]

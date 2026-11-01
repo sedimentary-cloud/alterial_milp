@@ -177,9 +177,9 @@ class TestDocumentCases(unittest.TestCase):
         grid = out["grid_results"][0]
         self.assertEqual(grid["status"], "optimal")
         # 3 个路口 × 2 个方向 × (12 - 9)=3s = 18s 短失误。
-        self.assertAlmostEqual(grid["negative_intersection_loss_s"], -18.0, places=4)
+        self.assertAlmostEqual(-grid["score"]["intersection"]["loss_s"], -18.0, places=4)
         sol = out["pareto"]["points"][0]["solution"]
-        self.assertAlmostEqual(sol["intersection_loss_s"], 18.0, places=4)
+        self.assertAlmostEqual(sol["score"]["intersection"]["loss_s"], 18.0, places=4)
 
     # Red band boundary affinity: penalize red band edges far from upstream green edges.
     def test_red_boundary_affinity_loss(self):
@@ -205,7 +205,7 @@ class TestDocumentCases(unittest.TestCase):
         # composite = weight * band - red boundary loss
         boundary_loss = sum(v["cost"] for v in red_edge_viols)
         self.assertAlmostEqual(grid["composite_best"],
-                               grid["bandwidth_objective_s"] - boundary_loss,
+                               grid["score"]["band"]["reward_breakdown"]["bandwidth"] - boundary_loss,
                                places=3)
 
     def test_red_boundary_hard_max_can_be_infeasible(self):
@@ -259,24 +259,24 @@ class TestDocumentCases(unittest.TestCase):
         sol = out["pareto"]["points"][0]["solution"]
         self.assertEqual(grid["status"], "optimal")
         # β 由 I2 的 30s 绿窗卡住；I3 的贴合损失 = 0.2 × (15 − 3) = 2.4s。
-        self.assertAlmostEqual(grid["bandwidth_objective_s"], 30.0, places=3)
-        self.assertAlmostEqual(sol["green_edge_loss_s"], 2.4, places=3)
+        self.assertAlmostEqual(grid["score"]["band"]["reward_breakdown"]["bandwidth"], 30.0, places=3)
+        self.assertAlmostEqual(sol["score"]["band"]["loss_breakdown"]["green_edge"], 2.4, places=3)
         self.assertAlmostEqual(grid["composite_best"], 30.0 - 2.4, places=3)
-        self.assertAlmostEqual(sol["margin_loss_s"], 0.0, places=6)
+        self.assertAlmostEqual(sol["score"]["band"]["loss_breakdown"]["margin"], 0.0, places=6)
         # 不钉偏移时：模型自己把带挪进 free_s 内，损失为 0、带宽不变。
         d_free = self._green_boundary_problem()
         d_free["global_constraints"] = []
         out_free = run(d_free)
         sol_free = out_free["pareto"]["points"][0]["solution"]
-        self.assertAlmostEqual(out_free["grid_results"][0]["bandwidth_objective_s"], 30.0, places=3)
-        self.assertAlmostEqual(sol_free["green_edge_loss_s"], 0.0, places=4)
+        self.assertAlmostEqual(out_free["grid_results"][0]["score"]["band"]["reward_breakdown"]["bandwidth"], 30.0, places=3)
+        self.assertAlmostEqual(sol_free["score"]["band"]["loss_breakdown"]["green_edge"], 0.0, places=4)
         self.assertAlmostEqual(out_free["grid_results"][0]["composite_best"], 30.0, places=3)
 
     def test_green_boundary_coef_override(self):
         # 需求级覆盖：free_s=0、coef=1 → 罚满 15s，composite 变成 15。
         out = run(self._green_boundary_problem(coef=1.0, free_s=0.0))
         sol = out["pareto"]["points"][0]["solution"]
-        self.assertAlmostEqual(sol["green_edge_loss_s"], 15.0, places=3)
+        self.assertAlmostEqual(sol["score"]["band"]["loss_breakdown"]["green_edge"], 15.0, places=3)
         self.assertAlmostEqual(out["grid_results"][0]["composite_best"], 15.0, places=3)
 
     def test_green_boundary_default_off(self):
@@ -285,7 +285,7 @@ class TestDocumentCases(unittest.TestCase):
         problem = ProblemInput.from_obj(d)
         self.assertFalse(problem.green_boundary_for(problem.demand("GW_up")).enabled)
         out = run(d)
-        self.assertAlmostEqual(out["pareto"]["points"][0]["solution"]["green_edge_loss_s"],
+        self.assertAlmostEqual(out["pareto"]["points"][0]["solution"]["score"]["band"]["loss_breakdown"]["green_edge"],
                                0.0, places=6)
         # 显式开启：全局默认 + 需求级覆盖都支持。
         d["objective"]["green_boundary_default"] = {"start": {"free_s": 3.0, "coef": 0.2}}
@@ -324,9 +324,9 @@ class TestDocumentCases(unittest.TestCase):
                                 pareto={"num_points": 2, "relax_max": 0.5, "topk_grids": 1}))
         self.assertAlmostEqual(self._composite(out), 40.5, places=3)
         pts = out["pareto"]["points"]
-        self.assertTrue(any(abs(p["intersection_loss"]) <= 45.0 + 1e-4 for p in pts))
+        self.assertTrue(any(abs(p["score"]["intersection"]["loss_s"]) <= 45.0 + 1e-4 for p in pts))
         # l=0 point must respect B* exactly at its relaxation
-        self.assertAlmostEqual(pts[0]["composite_actual"], 40.5, places=3)
+        self.assertAlmostEqual(pts[0]["score"]["band"]["composite_s"], 40.5, places=3)
 
     # T7: cycle-dependent min-green filtering
     def test_t7_plan_filtering(self):
@@ -462,7 +462,7 @@ class TestDocumentCases(unittest.TestCase):
         out = run(d)
         grid = out["grid_results"][0]
         self.assertEqual(grid["status"], "optimal")
-        self.assertAlmostEqual(grid["bandwidth_objective_s"], 22.0, places=3)
+        self.assertAlmostEqual(grid["score"]["band"]["reward_breakdown"]["bandwidth"], 22.0, places=3)
 
     def test_time_space_diagram_render(self):
         import os

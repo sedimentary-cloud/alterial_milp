@@ -305,15 +305,24 @@ class ParetoFrontierDiagram:
         divisor = float(cycle_s) if (normalize_by_cycle and cycle_s) else 1.0
         records = []
         for p in points:
-            if p.get("intersection_composite") is not None:
-                inter = float(p["intersection_composite"]) / divisor
+            score = p.get("score") or {}
+            band = score.get("band") or {}
+            inter = score.get("intersection") or {}
+            if band.get("composite_s") is not None:
+                composite = float(band["composite_s"])
+            else:
+                # 兼容旧数据。
+                composite = float(p.get("composite_actual",
+                                        p.get("composite_actual_s", 0.0)))
+            if inter.get("composite_s") is not None:
+                intersection = float(inter["composite_s"])
             else:
                 # 兼容旧数据：没有路口分数时用 -loss 近似（loss 为原始损失）。
-                inter = -float(p.get("intersection_loss",
-                                       p.get("intersection_loss_s", 0.0))) / divisor
+                intersection = -float(p.get("intersection_loss",
+                                             p.get("intersection_loss_s", 0.0)))
             records.append({
-                "composite": float(p.get("composite_actual", p.get("composite_actual_s", 0.0))) / divisor,
-                "intersection": inter,
+                "composite": composite / divisor,
+                "intersection": intersection / divisor,
                 "epsilon": float(p.get("epsilon", p.get("epsilon_s", 0.0))),
             })
         front = _non_dominated(records)
