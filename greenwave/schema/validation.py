@@ -76,7 +76,7 @@ def _validate_constraint_static(c: ConstraintSpec, *, is_global: bool,
 
 
 def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
-    """执行 V1–V10 以及实现中额外补充的静态校验。
+    """执行 V1–V14 以及实现中额外补充的静态校验。
 
     返回值是一个 issue 列表：
     - level="error" 表示必须停止；
@@ -161,6 +161,9 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                         "error", "V3",
                         f"plan {p.id!r} {d} boundary {j} adjust range must satisfy lo<=0<=hi",
                         (p.id, d, str(j), "adjust")))
+            if dp.uncontrolled:
+                # 全周期绿特例：没有边界，也没有“至少一个红段”的要求。
+                continue
             if len(dp.green_mask) != dp.boundary_count + 1:
                 issues.append(ValidationIssue(
                     "error", "V2",
@@ -350,6 +353,20 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
             issues.append(ValidationIssue("error", "V4", f"demand {b.id!r} max_bands must be >=1", (b.id,)))
         if b.weight < 0:
             issues.append(ValidationIssue("error", "V4", f"demand {b.id!r} weight must be >=0", (b.id,)))
+        # V14：红波路径上不能出现同方向的 uncontrolled 方案。
+        # 红波需要红窗，而全周期绿没有红窗；只要候选方案里存在这样的方案，
+        # 求解器就可能选中它，因此静态阶段直接报错，避免模型里出现无定义的红带。
+        if b.type == "red":
+            for node in b.nodes:
+                bad_plans = [p.id for p in problem.plans_of(node)
+                             if p.is_uncontrolled(b.direction)]
+                if bad_plans:
+                    issues.append(ValidationIssue(
+                        "error", "V14",
+                        f"red demand {b.id!r} uses node {node!r} direction {b.direction!r}, "
+                        f"but plan(s) {bad_plans} declare that direction uncontrolled; "
+                        f"red wave requires a red window",
+                        (b.id, node, *bad_plans)))
         # V12：绿波边界亲和（贴合损失）的配置检查。
         # margin 已移到 plan 的绿段上，demand 级不再有 margin，因此只检查
         # “free_s 是否大到永远不生效”。

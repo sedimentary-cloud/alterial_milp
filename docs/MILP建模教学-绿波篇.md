@@ -163,7 +163,7 @@
 | — | `BALANCED` | 均衡组（`z_g ≤ Β_b / target_b`）与 min_existing 短缺 |
 | — | `AGG` | 具名聚合的包络行（`t ≤/≥ e_i`）与 `x_p` 门控（§6.1） |
 | — | `PLAN_REWARD` / `TEMPLATE_REWARD` / `USER_REWARD` | owner=intersection_reward 的奖励松弛行与方案门控 |
-| `V1`～`V13` | `V1`～`V13` | **schema 输入校验规则编号**（`schema/validation.py`），建模前就把坏输入挡掉；例如 V4 节点顺序、V5 节点物理相邻、V7 全局约束不得引用方案作用域原子 |
+| `V1`～`V14` | `V1`～`V14` | **schema 输入校验规则编号**（`schema/validation.py`），建模前就把坏输入挡掉；例如 V4 节点顺序、V5 节点物理相邻、V7 全局约束不得引用方案作用域原子 |
 
 ### 0.6 重名提醒（同一个字母在本代码/文档里有多个含义）
 

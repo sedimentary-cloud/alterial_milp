@@ -112,8 +112,34 @@ class DirectionPlan:
     boundaries: tuple[BoundarySpec, ...] = ()
     green_mask: tuple[GreenSegmentSpec, ...] = field(
         default_factory=lambda: (GreenSegmentSpec(False),))
+    # 该方案在该方向是否不受控：全周期绿、无相位边界。
+    # 只有显式 true 才允许 boundaries/green_mask 省略；不能从空边界推断。
+    uncontrolled: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.uncontrolled, bool):
+            raise GWInputError("directions[d].uncontrolled must be a boolean")
+        if self.uncontrolled:
+            if self.boundaries:
+                raise GWInputError(
+                    "uncontrolled direction must not declare boundaries",
+                    hint="uncontrolled=true 表示全周期绿；请删除 boundaries")
+            if len(self.green_mask) > 1:
+                raise GWInputError(
+                    "uncontrolled direction may have at most one green segment",
+                    hint="uncontrolled=true 时 green_mask 可省略，或只写 [{\"green\": true}]")
+            if self.green_mask and not self.green_mask[0].green:
+                raise GWInputError(
+                    "uncontrolled direction green_mask must be green",
+                    hint="uncontrolled=true 时 green_mask 只能是全绿")
+            if self.green_mask and (self.green_mask[0].margin_start is not None
+                                    or self.green_mask[0].margin_end is not None):
+                raise GWInputError(
+                    "uncontrolled direction must not declare margins",
+                    hint="全周期绿没有绿窗边界，margin 无意义")
+            # 统一成单段全绿，后续 window 派生只走一个特例。
+            object.__setattr__(self, "green_mask", (GreenSegmentSpec(True),))
+            return
         pos = [b.pos_r for b in self.boundaries]
         if any(not (0.0 < p < 1.0) for p in pos):
             raise GWInputError("boundary positions must be in (0, 1)")
@@ -145,11 +171,26 @@ class DirectionPlan:
             return cls()
         if not isinstance(obj, Mapping):
             raise GWInputError(f"direction plan must be an object, got {obj!r}")
+        raw_uncontrolled = obj.get("uncontrolled", False)
+        if not isinstance(raw_uncontrolled, bool):
+            raise GWInputError("directions[d].uncontrolled must be a boolean",
+                               hint="写 true 或 false，不要写字符串/数字")
+        uncontrolled = raw_uncontrolled
         raw_bounds = obj.get("boundaries", ())
         boundaries = tuple(BoundarySpec.from_obj(b) for b in raw_bounds)
         raw_mask = obj.get("green_mask", obj.get("mask"))
+        if uncontrolled:
+            if boundaries:
+                raise GWInputError(
+                    "uncontrolled direction must not declare boundaries",
+                    hint="uncontrolled=true 表示全周期绿；请删除 boundaries")
+            if raw_mask is None:
+                return cls((), (GreenSegmentSpec(True),), True)
+            green_mask = tuple(GreenSegmentSpec.from_obj(x) for x in raw_mask)
+            return cls((), green_mask, True)
         if raw_mask is None:
-            raise GWInputError("direction plan requires green_mask")
+            raise GWInputError("direction plan requires green_mask",
+                               hint="受控方向必须写 green_mask；若该方向不受控请显式写 uncontrolled=true")
         green_mask = tuple(GreenSegmentSpec.from_obj(x) for x in raw_mask)
         return cls(boundaries, green_mask)
 
@@ -501,6 +542,17 @@ class PlanSpec:
     def __post_init__(self) -> None:
         if self.min_phase_s < 0.0:
             raise GWInputError("min_phase_s must be >= 0")
+        uncontrolled = [d for d in ("up", "down")
+                        if self.directions.get(d) is not None
+                        and self.directions[d].uncontrolled]
+        if len(uncontrolled) > 1:
+            raise GWInputError(
+                f"plan {self.id!r} has more than one uncontrolled direction",
+                hint="一个方案最多允许一个方向 uncontrolled；两个方向都不受控的路口不要放进 MILP")
+        if uncontrolled and self.double_cycle:
+            raise GWInputError(
+                f"plan {self.id!r} cannot combine double_cycle with uncontrolled direction",
+                hint="不受控方向没有相位边界，不能做双周期复制")
         for d in ("up", "down"):
             dp = self.directions.get(d)
             if dp is None:
@@ -553,6 +605,10 @@ class PlanSpec:
         specs = self._expanded_boundary_specs(d)
         return (("const", 0, 0.0),) + tuple((s[1], s[2], s[3]) for s in specs) + (("const", 1, 1.0),)
 
+    def is_uncontrolled(self, d: Direction) -> bool:
+        """该方案在该方向是否全周期绿、无相位边界。"""
+        return self.direction_plan(d).uncontrolled
+
     def expanded_segments(self, d: Direction) -> tuple[GreenSegmentSpec, ...]:
         segs = self.direction_plan(d).green_mask
         if not self.double_cycle:
@@ -591,12 +647,22 @@ class PlanSpec:
         return tuple(out)
 
     def derived_windows(self, d: Direction) -> tuple[DerivedInterval, ...]:
+        if self.is_uncontrolled(d):
+            return (DerivedInterval(
+                rid=1, kind="green", start_edge=0, end_edge=1, wrap=0,
+                start_r=0.0, end_r=1.0,
+            ),)
         return self._windows_from_ratios(self.expanded_edge_ratios(d),
                                          self.expanded_mask(d), self.id, d)
 
     def derived_windows_from_boundary_r(self, d: Direction,
                                         boundary_r: Mapping[int, float]):
         """Derived windows using adjusted boundary values (or nominal if absent)."""
+        if self.is_uncontrolled(d):
+            return (DerivedInterval(
+                rid=1, kind="green", start_edge=0, end_edge=1, wrap=0,
+                start_r=0.0, end_r=1.0,
+            ),)
         ratios = []
         for edge in range(len(self.expanded_edge_sources(d))):
             kind, src, offset = self.expanded_edge_sources(d)[edge]
@@ -643,6 +709,8 @@ class PlanSpec:
 
     # -- derived red intervals -------------------------------------------------
     def derived_red_intervals(self, d: Direction) -> tuple[DerivedInterval, ...]:
+        if self.is_uncontrolled(d):
+            return ()
         green = self.derived_windows(d)
         if not green:
             return ()
@@ -1469,14 +1537,18 @@ def _problem_model_dump(self: ProblemInput) -> dict[str, Any]:
             "id": p.id, "intersection": p.intersection, "double_cycle": p.double_cycle,
             "min_phase_s": p.min_phase_s,
             "directions": {
-                d: {
-                    "boundaries": [
-                        {"pos_r": b.pos_r,
-                         "adjust": None if b.adjust is None else [b.lo_r, b.hi_r]}
-                        for b in p.direction_plan(d).boundaries
-                    ],
-                    "green_mask": [seg.to_obj() for seg in p.direction_plan(d).green_mask],
-                }
+                d: (
+                    {"uncontrolled": True}
+                    if p.direction_plan(d).uncontrolled else
+                    {
+                        "boundaries": [
+                            {"pos_r": b.pos_r,
+                             "adjust": None if b.adjust is None else [b.lo_r, b.hi_r]}
+                            for b in p.direction_plan(d).boundaries
+                        ],
+                        "green_mask": [seg.to_obj() for seg in p.direction_plan(d).green_mask],
+                    }
+                )
                 for d in ("up", "down")
             },
             "hard_constraints": [cmap(c) for c in p.hard_constraints],

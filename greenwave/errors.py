@@ -25,7 +25,7 @@ class ValidationIssue:
     """A single static input-validation finding.
 
     ``level`` is one of ``"error"``, ``"warning"`` or ``"info"``.  ``code``
-    carries the V-number from the design document (V1..V13).
+    carries the V-number from the design document (V1..V14).
     """
 
     level: str
@@ -99,7 +99,7 @@ class GWValidationError(GWError):
     """静态输入校验发现至少一个 error。"""
 
     code = "GW-VALIDATION"
-    default_cause = "输入通过了 JSON 解析，但违反了业务校验规则（V1..V13）。"
+    default_cause = "输入通过了 JSON 解析，但违反了业务校验规则（V1..V14）。"
     default_hint = "逐条修正 issues 中的错误；规则说明见 docs/配置手册与数学原理.md 的校验章节。"
 
     def __init__(self, issues: Iterable[ValidationIssue]):

@@ -27,7 +27,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Literal, Mapping
 
-from ..errors import GWInvariantError, GWModelError
+from ..errors import GWInputError, GWInvariantError, GWModelError
 from ..preprocess.context import GridPointContext
 from ..schema.models import (BandDemandSpec, ConstraintSpec, ConstraintTemplate,
                              Direction, PlanSpec, ProblemInput, Side)
@@ -1610,6 +1610,16 @@ class ModelBuilder:
                     hint="检查 demand.nodes 配置；红波带只支持相邻对。")
             up_node, down_node = b.nodes
             d = b.direction
+            bad = [(node, p.id) for node in (up_node, down_node)
+                   for p in self.problem.plans_of(node)
+                   if p.is_uncontrolled(d)]
+            if bad:
+                detail = ", ".join(f"{node}/{pid}" for node, pid in bad)
+                raise GWInputError(
+                    f"red demand {b.id!r} uses uncontrolled direction {d!r} ({detail})",
+                    hint="红波需要红窗；请删掉该红波需求，或把这些方案改成受控方向",
+                    context={"demand": b.id, "direction": d,
+                             "plans": [pid for _, pid in bad]})
             tau = self.ctx.tau_s.get((up_node, d))
             if self.ctx.max_window_slots(up_node, d) <= 0 or self.ctx.max_window_slots(down_node, d) <= 0:
                 continue

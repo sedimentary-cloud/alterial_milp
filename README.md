@@ -182,7 +182,7 @@ result = run_multistage(problem, max_rounds=3, restarts=2)
 
 ```text
 greenwave/
-├── schema/          # 不可变输入模型 + 静态校验 V1–V10
+├── schema/          # 不可变输入模型 + 静态校验 V1–V14
 ├── preprocess/      # 格点常量化 + 方案可行性 LP 过滤
 ├── heuristic/       # 贪心初始解 / 块坐标 refinement
 ├── model/           # 变量注册表、派生窗口、C1–C13、目标装配（变量名统一由 naming.py 生成）
@@ -214,6 +214,7 @@ tests/
   [配置手册 §6.7「目标账本」](docs/配置手册与数学原理.md)；
 - 结果 JSON 的分数统一放在 `score.band` / `score.intersection`（含 breakdown），
   顶层只保留 `composite_s` / `loss_s` 两个别名；
+- 支持方向级 `uncontrolled: true`（全周期绿、无相位边界）；红波路径经过不受控方向时静态报错；
 - 全局硬约束（上行带宽 >= 15s）；
 - 全局软约束（上行带宽尽量 >= 20s）；
 - 中间路口可调绿灯结束点，首末路口只调周期偏置；

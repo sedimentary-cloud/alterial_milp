@@ -186,11 +186,27 @@
 }
 ```
 
+方向级全绿特例：
+
+```json
+{
+  "directions": {
+    "up": {"uncontrolled": true},
+    "down": {"boundaries": [{"pos_r": 0.5}],
+             "green_mask": [{"green": true}, {"green": false}]}
+  }
+}
+```
+
 - 单周期边界在 `(0, 1)`；双周期在 `(0, 0.5)`；声明边界数 ≤ 6。
 - `green_mask` 长度 = 边界数 + 1，方案内固定；每项是对象 `{green, margin}`。
   `margin.start/end` 可选，只有该段是绿、且边界两侧颜色不同时生效；
   同色边界（绿-绿 / 红-红）与红段上的 margin 会被忽略（校验警告）。
-- 一个方向必须同时有绿区间和红区间；首尾区间不能同时为绿。
+- 受控方向必须同时有绿区间和红区间；首尾区间不能同时为绿。
+- `directions[d].uncontrolled: true` 表示该方案在该方向全周期绿、没有相位边界；
+  此时 `boundaries` / `green_mask` 可省略。一个方案最多一个方向不受控；两个方向都
+  不受控的路口不进入 MILP。全绿方向合成 `[0,C]` 绿窗、无红窗；红波需求经过它时
+  静态校验报 V14。
 - 绿窗 = 极大连续绿区间；红窗 = 整周期补集中的极大连续非绿区间。
 - 红窗允许跨 0/C 以及双周期的 0.5；跨 0/C 用 `wrap=1` 表示，不拆 ID。
 
@@ -763,7 +779,7 @@ Step 4  块坐标 refinement（默认 3 轮）：
 ### 7.1 总体流水线
 
 ```
-输入校验（V1–V10）
+输入校验（V1–V14）
    │
    ▼
 逐格点（并行，进程池）：
@@ -871,7 +887,7 @@ scipy 无法获取 IIS。提供「分块软化」调试器：按约束组（C1�
 ```
 greenwave/
 ├── schema/          # pydantic 数据模型：Corridor / Plan / BandDemand / ObjectiveConfig …
-│   └── validation.py# 校验规则 V1–V10
+│   └── validation.py# 校验规则 V1–V14
 ├── preprocess/
 │   └── feasibility.py   # §5 方案可行性过滤（固定方案算术检查 + 可调方案 LP）
 ├── heuristic/
@@ -917,7 +933,7 @@ tests/
    `plan_on[I1,P1]`、`offset[I2]`、`win_avail[I2,up,1]`（窗口端点本身是表达式，不是变量）、`bnd_delta[I2_P1,up,0]` / `bnd_xdelta[I2_P1,up,0]`、`gw_start[GW_up,1]` / `gw_width[GW_up,1]` / `gw_on[GW_up,1]`、`gw_win[GW_up,1,I2,2]`、`gw_cycle[GW_up,1,I2]`、`gw_margin_lo[GW_up,1,I2,1,I2_P1]` / `gw_margin_hi[GW_up,1,I2,1,I2_P1]`、`rw_start[RW_12,1]` / `rw_width[RW_12,1]` / `rw_on[RW_12,1]`、`rw_up_win[RW_12,1,g1]` / `rw_down_win[RW_12,1,r2,k0]`、`soft_slack[c7.pos]`（命名统一由 `greenwave/model/naming.py` 生成）；
 4. **错误体系**：所有主动错误继承 `GWError`，统一带 `code`/`cause`/`hint`/`context`。`GWInputError`（输入 JSON，兼容 `ValueError`）、`GWValidationError`（静态校验，携带 V 编号）、`GWInfeasibleGridPoint`（格点不可行，携带诊断记录）、`GWModelError`（建模层）、`GWSemanticError`（语义规则）、`GWSolveError`（求解器层）、`GWInvariantError`（内部不变式，兼容 `AssertionError`）；
 5. **日志**：`logging.getLogger("greenwave.<module>")`；格点级日志必须带 `cycle_s / kappa` context 字段；
-6. **pydantic 校验器只查静态合法性**（V1–V10）；**格点相关可行性一律在 preprocess 层判定**，不混入 schema。
+6. **pydantic 校验器只查静态合法性**（V1–V14）；**格点相关可行性一律在 preprocess 层判定**，不混入 schema。
 
 ### 10.2 schema 包
 
@@ -1023,8 +1039,9 @@ class GreenSegmentSpec(BaseModel, frozen=True):
     margin_end: MarginSpec | None = None     # 仅绿段且右边界颜色变化时生效
 
 class DirectionPlan(BaseModel, frozen=True):
-    boundaries: tuple[BoundarySpec, ...]
-    green_mask: tuple[GreenSegmentSpec, ...]  # 长度 = 边界数 + 1
+    boundaries: tuple[BoundarySpec, ...] = ()
+    green_mask: tuple[GreenSegmentSpec, ...] = ()  # 长度 = 边界数 + 1
+    uncontrolled: bool = False                     # 全周期绿，无相位边界
 
 class ObjectiveConfig(BaseModel, frozen=True):
     band_demands: tuple[BandDemandSpec, ...]
@@ -1057,7 +1074,7 @@ class ProblemInput(BaseModel, frozen=True):
     def plans_of(self, intersection: str) -> tuple[PlanSpec, ...]: ...
     def demand(self, demand_id: str) -> BandDemandSpec: ...
     def validate_all(self) -> list[ValidationIssue]:
-        """执行 V1–V10；返回 issue 列表，error 级 issue 非空时调用方抛 GWValidationError。"""
+        """执行 V1–V14；返回 issue 列表，error 级 issue 非空时调用方抛 GWValidationError。"""
 ```
 
 ### 10.3 GridPointContext（核心中间对象）
