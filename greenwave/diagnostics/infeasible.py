@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+from typing import Any, cast
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -89,9 +91,11 @@ class InfeasibilityDiagnoser:
                         np.asarray(indptr, dtype=int)), shape=(len(lb_list), n + m))
         try:
             res = milp(c=c, integrality=np.asarray(integrality, dtype=int),
-                       bounds=Bounds(np.asarray(lbs, dtype=float), np.asarray(ubs, dtype=float)),
-                       constraints=LinearConstraint(A, np.asarray(lb_list, dtype=float),
-                                                    np.asarray(ub_list, dtype=float)),
+                       bounds=Bounds(cast(Any, np.asarray(lbs, dtype=float)),
+                                     cast(Any, np.asarray(ubs, dtype=float))),
+                       constraints=LinearConstraint(cast(Any, A),
+                                                    cast(Any, np.asarray(lb_list, dtype=float)),
+                                                    cast(Any, np.asarray(ub_list, dtype=float))),
                        options={"time_limit": 60.0, "disp": False})
         except Exception as exc:  # pragma: no cover
             return DiagnosisReport((), f"diagnostic solve failed: {exc}")

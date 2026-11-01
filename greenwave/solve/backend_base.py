@@ -16,7 +16,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, Protocol
+from typing import Any, Generic, Literal, Protocol, TypeVar
 
 import numpy as np
 
@@ -57,22 +57,25 @@ class ModelSession(Protocol):
     backend_name: str
 
 
+SessionT = TypeVar("SessionT", bound=ModelSession)
+
+
 # 所有求解器后端的“父类”，定义统一接口。
-class SolverBackend(ABC):
+class SolverBackend(ABC, Generic[SessionT]):
     name: str
 
     @abstractmethod
-    def create(self, model: ArterialModel) -> ModelSession: ...
+    def create(self, model: ArterialModel) -> SessionT: ...
 
     @abstractmethod
-    def solve(self, session: ModelSession, options: SolveOptions) -> SolveResult: ...
+    def solve(self, session: SessionT, options: SolveOptions) -> SolveResult: ...
 
     @abstractmethod
-    def set_objective(self, session: ModelSession, expr: LinearExpr,
+    def set_objective(self, session: SessionT, expr: LinearExpr,
                       sense: Literal["max", "min"]) -> None: ...
 
     @abstractmethod
-    def add_constraint(self, session: ModelSession, expr: LinearExpr,
+    def add_constraint(self, session: SessionT, expr: LinearExpr,
                        sense: str, rhs: float, meta: ConstraintMeta) -> int: ...
 
 

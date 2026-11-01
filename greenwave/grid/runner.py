@@ -56,7 +56,13 @@ class GridRunReport:
 
     def best(self, k: int = 1) -> list[GridPointResult]:
         valid = [r for r in self.results if r.composite_best is not None]
-        valid.sort(key=lambda r: r.composite_best, reverse=True)
+
+        def score(r: GridPointResult) -> float:
+            value = r.composite_best
+            assert value is not None
+            return value
+
+        valid.sort(key=score, reverse=True)
         return valid[:max(0, k)]
 
 
@@ -203,7 +209,7 @@ class GridRunner:
 
     def run(self) -> GridRunReport:
         # 阶段 A：所有格点先做过滤和贪心（很便宜）。
-        candidates: list[tuple[float, float, GridPointContext, GreedySolution]] = []
+        candidates: list[tuple[float, float, GridPointContext, GreedySolution | None]] = []
         skipped: list[GridPointResult] = []
         # Phase A: filtering + greedy scoring (cheap, sequential)
         for cycle_s in self.problem.grid.cycles_s:

@@ -264,7 +264,7 @@ class SolutionDecoder:
                 gm = meta.green.get(b.id)
                 if gm is None:
                     continue
-                table = gm.table
+                table: Any = gm.table
                 for q in range(1, gm.qmax + 1):
                     if values[gm.e[q].index] < 0.5:
                         continue
@@ -480,7 +480,7 @@ class SolutionDecoder:
             use_edge = gb.enabled and ((gb.start is not None and gb.start.coef > 0)
                                        or (gb.end is not None and gb.end.coef > 0))
             gm = meta.green[b.id]
-            table = gm.table
+            table: Any = gm.table
             for j, node in enumerate(b.nodes):
                 k = band.windows.get(node)
                 if k is None:

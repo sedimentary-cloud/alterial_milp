@@ -39,7 +39,8 @@ from .meta import (AggregateModel, BalancedGroupModel, BigMTable,
                    RedBoundarySlackRef, RedDemandModel, SoftPenaltyRef,
                    SoftRewardRef)
 from .variables import GVarType, VarHandle, VariableRegistry
-from .windows import EffectiveWindowBuilder, EffectiveWindowSet, RedWindowBuilder
+from .windows import (EffectiveWindowBuilder, EffectiveWindowSet,
+                      RedWindowBuilder, RedWindowSet)
 
 
 @dataclass
@@ -522,6 +523,7 @@ class ModelBuilder:
         for t in c.terms:
             a = t.atom
             if a.kind == "boundary" and plan is not None:
+                assert a.direction is not None and a.index is not None
                 nom = plan.nominal_boundary_r(a.direction, a.index)
                 r = plan.boundary_adjust_range(a.direction, a.index)
                 lov = (nom + (r[0] if r is not None else 0.0)) * self.C

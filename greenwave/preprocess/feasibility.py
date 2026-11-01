@@ -9,7 +9,7 @@ v2 的可行性变量是每个方向的可调相位边界 δ（比例域）。
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from scipy.optimize import linprog
@@ -290,7 +290,10 @@ class FeasibilityFilter:
 
         if feasible:
             # 前 n 个变量才是 δ；z 只是目标里的辅助量。
-            witness = tuple((d, j, float(x[index[(d, j)]])) for (d, j) in keys)
+            assert x is not None
+            witness: tuple[tuple[Direction, int, float], ...] = tuple(
+                (cast(Direction, d), int(j), float(x[index[(d, j)]]))
+                for (d, j) in keys)
             return PlanFeasibility(True, (), witness)
         reasons = list(self._geometry_violations(plan, cycle_s, {}))
         reasons += [f"{c.id}: hard constraint infeasible together with boundary ordering/min_phase"

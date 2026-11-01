@@ -515,6 +515,8 @@ def validate_problem(problem: ProblemInput) -> list[ValidationIssue]:
                         "error", "V13",
                         f"aggregate {a.id!r} boundary atom belongs to plan {at.plan!r}, "
                         f"expected {a.plan!r}", (a.id,)))
+                if at.plan is None:
+                    continue
                 p = plans_by_id.get(at.plan)
                 if p is None:
                     continue

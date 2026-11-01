@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 from scipy.sparse import csr_matrix, vstack
@@ -45,7 +45,7 @@ class HighspySession(ModelSession):
 
 
 # highspy 后端实现。
-class HighspyBackend(SolverBackend):
+class HighspyBackend(SolverBackend[HighspySession]):
     name = "highspy"
 
     def create(self, model: ArterialModel) -> HighspySession:
@@ -106,7 +106,10 @@ class HighspyBackend(SolverBackend):
             h.changeObjectiveSense(highspy.ObjSense.kMaximize)
         else:
             h.changeObjectiveSense(highspy.ObjSense.kMinimize)
-        num_rows = base_A.shape[0]
+        if base_A is None:
+            raise GWSolveError("highspy backend: model constraint matrix is missing")
+        base_A = cast(Any, base_A)
+        num_rows = int(base_A.shape[0])
         if num_rows:
             base_A = base_A.tocsr()
             starts = np.asarray(base_A.indptr, dtype=np.int32)

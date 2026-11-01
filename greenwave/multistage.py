@@ -185,7 +185,7 @@ def extract_prior(solution: SolutionRecord, problem: ProblemInput,
         bands[(pb.demand, pb.slot)] = pb
     return PriorSolution(
         plan_selection={str(k): str(v) for k, v in dict(solution.plan_selection).items()},
-        adjustments_r={tuple(k): float(v) for k, v in dict(solution.adjustments_r).items()},
+        adjustments_r={k: float(v) for k, v in solution.adjustments_r.items()},
         bands=bands,
         demand_order=_order_from_bands(bands.values()),
         source=source,
@@ -209,7 +209,7 @@ def extract_prior_from_greedy(greedy: GreedySolution, problem: ProblemInput,
         bands[(pb.demand, pb.slot)] = pb
     return PriorSolution(
         plan_selection={str(k): str(v) for k, v in dict(greedy.plan_selection).items()},
-        adjustments_r={tuple(k): float(v) for k, v in dict(greedy.adjustments_r).items()},
+        adjustments_r={k: float(v) for k, v in greedy.adjustments_r.items()},
         bands=bands,
         demand_order=_order_from_bands(bands.values()),
         source="greedy",
@@ -731,7 +731,7 @@ def _initial_adjustment_starts(problem: ProblemInput, ctx: GridPointContext,
     if problem.solver.heuristic.enabled:
         try:
             greedy = GreedyConstructor(problem, ctx).run()
-            starts.append({tuple(k): float(v) for k, v in greedy.adjustments_r.items()
+            starts.append({k: float(v) for k, v in greedy.adjustments_r.items()
                            if abs(float(v)) > 1e-12})
         except Exception:
             pass

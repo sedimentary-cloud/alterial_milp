@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, ClassVar, Literal, Mapping, Sequence, cast
 
 from ..errors import ValidationIssue
 
@@ -198,6 +198,7 @@ class AtomRef:
                 raise ValueError(f"boundary atom missing fields: {missing}")
             if self.direction not in ("up", "down"):
                 raise ValueError("boundary atom direction must be up/down")
+            assert self.index is not None
             if self.index < 0:
                 raise ValueError("boundary atom index must be >= 0")
         elif self.kind in ("window_duration", "red_duration"):
@@ -398,8 +399,11 @@ class ConstraintScope:
         if not isinstance(obj, Mapping):
             raise ValueError(f"constraint scope must be an object, got {obj!r}")
         raw_dirs = obj.get("directions")
-        directions = (tuple(_check_direction(d) for d in raw_dirs)
-                      if raw_dirs is not None else ("up", "down"))
+        directions: tuple[Direction, ...]
+        if raw_dirs is None:
+            directions = ("up", "down")
+        else:
+            directions = tuple(_check_direction(d) for d in raw_dirs)
         plan_ids = obj.get("plan_ids")
         window_indices = obj.get("window_indices")
         return cls(
@@ -1098,10 +1102,13 @@ class AggregateContributionSpec:
             raise ValueError(
                 "aggregate contribution requires explicit "
                 f"target/sign/direction (missing {missing}); legacy auto-sign is not supported")
-        return cls(target=str(obj["target"]),
-                   sign=int(obj["sign"]),
-                   weight=_num(obj.get("weight", 1.0), "weight"),
-                   direction=str(obj["direction"]))
+        return cls(
+            target=cast(Literal["band_objective", "intersection_reward",
+                                "intersection_loss"], str(obj["target"])),
+            sign=int(obj["sign"]),
+            weight=_num(obj.get("weight", 1.0), "weight"),
+            direction=cast(Literal["maximize", "minimize"], str(obj["direction"])),
+        )
 
     def to_obj(self) -> dict[str, Any]:
         return {"target": self.target, "sign": self.sign,
@@ -1398,7 +1405,7 @@ class ProblemInput:
         )
 
     # pydantic-like alias for readability at call sites
-    model_dump = None  # replaced below by method; placeholder for type checkers
+    model_dump: ClassVar[Any] = None  # replaced below by method
 
 
 def _atom_obj(a: AtomRef) -> dict[str, Any]:

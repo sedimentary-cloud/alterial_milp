@@ -16,7 +16,7 @@ from __future__ import annotations
 import time
 import warnings
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 from scipy.optimize import Bounds, LinearConstraint, milp
@@ -46,7 +46,7 @@ class ScipySession(ModelSession):
 
 
 # scipy 后端实现。
-class ScipyBackend(SolverBackend):
+class ScipyBackend(SolverBackend[ScipySession]):
     name = "scipy"
 
     def create(self, model: ArterialModel) -> ScipySession:
@@ -92,8 +92,8 @@ class ScipyBackend(SolverBackend):
             else:
                 base_lb = np.append(base_lb, rhs - const)
                 base_ub = np.append(base_ub, rhs - const)
-        bounds = Bounds(np.asarray(model.vars.lbs, dtype=float),
-                        np.asarray(model.vars.ubs, dtype=float))
+        bounds = Bounds(cast(Any, np.asarray(model.vars.lbs, dtype=float)),
+                        cast(Any, np.asarray(model.vars.ubs, dtype=float)))
         integrality = np.asarray(model.vars.integrality, dtype=int)
         scipy_options = {
             "time_limit": float(options.time_limit_s),
@@ -115,7 +115,8 @@ class ScipyBackend(SolverBackend):
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=r"Unrecognized options detected.*")
                 res = milp(c=c, integrality=integrality, bounds=bounds,
-                           constraints=LinearConstraint(base_A, base_lb, base_ub),
+                           constraints=LinearConstraint(cast(Any, base_A), cast(Any, base_lb),
+                                                        cast(Any, base_ub)),
                            options=scipy_options)
         except Exception as exc:  # pragma: no cover - solver level failure
             return SolveResult(SolveStatus.ERROR, None, None, None,

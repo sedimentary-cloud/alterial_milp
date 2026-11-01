@@ -1,6 +1,8 @@
 """语义规则编译器：高层规则 -> ProblemInput 增量补丁（v2：相位边界）。"""
 from __future__ import annotations
 
+from typing import Any, cast
+
 from dataclasses import replace
 
 from ..errors import GWSemanticError
@@ -45,7 +47,7 @@ def _make_constraint(rule: SemanticRule, terms: tuple[LinearTerm, ...], *,
     return ConstraintSpec(
         id=f"sem:{rule.id}",
         terms=terms,
-        sense=sense,
+        sense=cast(Any, sense),
         hard=(soft is None),
         rhs_s=rhs_s,
         rhs_ratio=rhs_ratio,
@@ -63,7 +65,7 @@ def _boundary_term(intersection: str, plan_id: str, d: str, index: int,
                    coef: float) -> LinearTerm:
     return LinearTerm(
         atom=AtomRef(kind="boundary", intersection=intersection, plan=plan_id,
-                     direction=d, index=index),
+                     direction=cast(Any, d), index=index),
         coef=coef,
     )
 
@@ -72,7 +74,7 @@ def _green_duration_term(target: Target, plan_id: str, d: str, k_eff: int,
                          coef: float = 1.0) -> LinearTerm:
     return LinearTerm(
         atom=AtomRef(kind="window_duration", intersection=target.intersection,
-                     plan=plan_id, direction=d, window=k_eff),
+                     plan=plan_id, direction=cast(Any, d), window=k_eff),
         coef=coef,
     )
 
@@ -84,13 +86,14 @@ def _endpoint_linear_terms(plan: PlanSpec, d: str, k_eff: int, side: str,
     The result is used only for sync equalities.  Cycle-edge constants and
     double-cycle 0.5 offsets are moved to ``rhs_ratio``.
     """
-    w = plan.window_edge_span(d, k_eff)
+    dd = cast(Any, d)
+    w = plan.window_edge_span(dd, k_eff)
     edge = w.start_edge if side == "start" else w.end_edge
     wrap = 0 if side == "start" else w.wrap
-    kind, src, offset = plan.expanded_edge_sources(d)[edge]
+    kind, src, offset = plan.expanded_edge_sources(dd)[edge]
     if kind == "const":
         return [], -coef * (float(offset) + wrap)
-    terms = [_boundary_term(plan.intersection, plan.id, d, src, coef)]
+    terms = [_boundary_term(plan.intersection, plan.id, dd, src, coef)]
     return terms, -coef * (offset + wrap)
 
 
@@ -190,7 +193,7 @@ def _compile_duration_limit(rule: SemanticRule, problem: ProblemInput,
          "constraint_id": c.id, "path": "plan_constraint", "red_rid": rr.rid})
 
 
-def compile_semantics(problem_json: dict, semantics_json: dict) -> tuple[ProblemInput, CompileReport, dict]:
+def compile_semantics(problem_json: dict, semantics_json: Any) -> tuple[ProblemInput, CompileReport, dict]:
     """Compile semantic rules into a ProblemInput and a report."""
     problem = ProblemInput.from_obj(problem_json)
     sem = SemanticInput.from_obj(semantics_json)

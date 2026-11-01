@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from ..preprocess.context import GridPointContext
-from ..schema.models import (AggregateSpec, BandDemandSpec, Direction,
-                             ProblemInput, Side)
+from ..schema.models import (AggregateSpec, BalancedGroupSpec, BandDemandSpec,
+                             Direction, ProblemInput, Side)
 from .constraints import ConstraintMeta
 from .expressions import LinearExpr
 from .variables import VarHandle
@@ -135,7 +135,7 @@ class AggregateModel:
 # 一个均衡组：z 是组内最小带宽，y_b 表示需求 b 是否存在。
 @dataclass
 class BalancedGroupModel:
-    group: object                 # BalancedGroupSpec
+    group: BalancedGroupSpec
     z: VarHandle
     y: dict[str, VarHandle]
     bandwidth_exprs: dict[str, LinearExpr]

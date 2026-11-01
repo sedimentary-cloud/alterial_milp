@@ -39,7 +39,7 @@ from __future__ import annotations
 import itertools
 import time
 from dataclasses import dataclass, replace
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping, Sequence, cast
 
 import numpy as np
 
@@ -49,7 +49,7 @@ from .model import naming
 from .preprocess.context import GridPointContext
 from .preprocess.feasibility import FeasibilityFilter
 from .report.solution import SolutionDecoder, SolutionRecord
-from .schema.models import (ConstraintSpec, ConstraintTemplate, ProblemInput)
+from .schema.models import (ConstraintSpec, ConstraintTemplate, Direction, ProblemInput)
 from .solve import make_backend
 from .solve.backend_base import SolveOptions, SolveResult, SolveStatus
 
@@ -467,8 +467,9 @@ def _group_penalty_composite(problem: ProblemInput, plan_id: str,
     plan = problem.plan(plan_id)
     if not plan.soft_constraints:
         return 0.0
-    deltas = {(d, j): float(v) for (pid, d, j), v in adjustments_r.items()
-              if pid == plan_id}
+    deltas = cast(dict[tuple[Direction, int], float],
+                  {(d, j): float(v) for (pid, d, j), v in adjustments_r.items()
+                   if pid == plan_id})
     meas = FeasibilityFilter(problem)
     total = 0.0
     for c in plan.soft_constraints:
@@ -582,7 +583,8 @@ def _assemble(problem: ProblemInput, model: ArterialModel,
                 values[idx] = 1.0 if plan_by_node.get(iid) == pid else 0.0
                 covered[idx] = True
             elif naming.is_family(name, naming.BND_XDELTA):
-                pid, d, j = naming.keys_of(name)
+                pid, d, j_s = naming.keys_of(name)
+                j = int(j_s)
                 iid = problem.plan(pid).intersection
                 bd_idx = full_index.get(naming.bnd_delta(pid, d, j))
                 chosen = plan_by_node.get(iid) == pid
