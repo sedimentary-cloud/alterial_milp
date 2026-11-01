@@ -69,7 +69,10 @@ class ConstraintStore:
         expr >= rhs 会变成 lower=rhs, upper=inf；
         expr == rhs 会变成上下界都等于 rhs。
         """
-        from scipy.sparse import csr_matrix
+        # scipy is a declared runtime dependency, but some IDE/type-checker
+        # interpreters do not expose scipy's type information for this lazy import.
+        # noinspection PyUnresolvedReferences
+        from scipy.sparse import csr_matrix  # type: ignore[reportMissingImports]
         data: list[float] = []
         indices: list[int] = []
         indptr: list[int] = [0]

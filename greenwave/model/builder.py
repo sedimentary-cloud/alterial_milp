@@ -1672,7 +1672,10 @@ class ModelBuilder:
                         {"kind": "red_down_assignment", "demand": b.id, "slot": q,
                          "red_rid": r, "shift": k})
 
-            rmodel = RedDemandModel(b, qmax, u, beta, e, ag, ar, gw_up, red_down,
+            # PyCharm/Pyright occasionally fail to synthesize a dataclass
+            # __init__ when the module is analyzed without its runtime deps.
+            # noinspection PyArgumentList
+            rmodel = RedDemandModel(b, qmax, u, beta, e, ag, ar, gw_up, red_down,  # type: ignore
                                     ag_slots, ar_keys, m_shift)
             self.meta.red_demands[b.id] = rmodel
             self._add_band_slot_symmetry(b.id, qmax, e, beta, "red")
